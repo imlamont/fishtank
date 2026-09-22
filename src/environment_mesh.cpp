@@ -83,6 +83,31 @@ std::vector<MeshVertex> buildWallsMesh(const Vec3& halfExtents) {
     return verts;
 }
 
+std::vector<MeshVertex> buildWaterMesh(const Vec3& halfExtents, int gridN) {
+    std::vector<MeshVertex> verts;
+    if (gridN < 1) gridN = 1;
+    verts.reserve((size_t)gridN * gridN * 6);
+
+    auto gridPoint = [&](int i, int j) {
+        float x = -halfExtents.x + (2.0f * halfExtents.x) * ((float)i / gridN);
+        float z = -halfExtents.z + (2.0f * halfExtents.z) * ((float)j / gridN);
+        return Vec3(x, 0.0f, z); // flat at rest — the renderer's shader adds the ripple
+    };
+
+    for (int i = 0; i < gridN; ++i) {
+        for (int j = 0; j < gridN; ++j) {
+            Vec3 a = gridPoint(i, j);
+            Vec3 b = gridPoint(i + 1, j);
+            Vec3 c = gridPoint(i + 1, j + 1);
+            Vec3 d = gridPoint(i, j + 1);
+            // Flipped winding for +Y normal, same reasoning as the floor.
+            pushTri(verts, a, c, b);
+            pushTri(verts, a, d, c);
+        }
+    }
+    return verts;
+}
+
 std::vector<MeshVertex> buildPlantBladeMesh() {
     std::vector<MeshVertex> verts;
     const int segments = 5;

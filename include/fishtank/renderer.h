@@ -21,12 +21,12 @@ public:
     void render(const Boids& sim, float timeSeconds);
 
     // Casts a ray from the camera through the given screen point (NDC,
-    // x/y in [-1, 1], y-up) and intersects it with the tank's water-surface
-    // plane — i.e. converts a click/tap into the same world (x, z) that
-    // ends up on screen where the user actually clicked, given the current
-    // (possibly swaying) camera. Uses the exact same camera as render() for
-    // the given sim/timeSeconds, so call it with the same timeSeconds you're
-    // about to render with.
+    // x/y in [-1, 1], y-up) and raymarches it against the tank's *animated*
+    // water surface (the same ripple the water mesh renders with) to find
+    // where it crosses — i.e. converts a click/tap into the same world
+    // (x, z) that ends up on screen where the user actually clicked. Uses
+    // the exact same camera as render() for the given sim/timeSeconds, so
+    // call it with the same timeSeconds you're about to render with.
     Vec3 pickSurfacePoint(float ndcX, float ndcY, const Boids& sim, float timeSeconds) const;
 
     // Orbits the camera around the tank. dYaw/dPitch are in radians and
@@ -56,11 +56,14 @@ private:
 
     Shader shader_;
     Shader plantShader_;
+    Shader wallShader_;
+    Shader waterShader_;
     Mesh fishMesh_;
     Mesh foodMesh_;
     Mesh floorMesh_;
     Mesh wallsMesh_;
     Mesh plantMesh_;
+    Mesh waterMesh_;
     std::unique_ptr<Plants> plants_;
     int width_ = 1, height_ = 1;
 

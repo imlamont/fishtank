@@ -34,23 +34,28 @@ reconsider — that was a deliberate choice, not an oversight.
 ```
 include/fishtank/   Headers — math3d (vec3/mat4, no external dep), boids (fish/
                      food sim), fish_mesh (fish + food meshes), environment_mesh
-                     (floor/walls/plant-blade meshes), plants (plant scatter
-                     data, no sim needed — sway is shader-side), shader,
+                     (floor/walls/plant-blade/water meshes), plants (plant
+                     scatter data, no sim needed — sway is shader-side), shader,
                      renderer, app (platform-independent glue), gl_compat/gl_loader
 src/
   main_web.cpp       Emscripten entry point, exports the C API above
-  main_native.cpp    GLFW desktop window — click to feed, Esc to quit
+  main_native.cpp    GLFW desktop window — click to feed, drag to orbit, Esc
+                     to quit. Also has a headless screenshot dump (see
+                     "Debugging" below) — no browser needed to check a
+                     rendering change visually.
   gl_loader.cpp      Native-only: loads GL functions via glfwGetProcAddress
   boids.cpp          Simulation: separation/alignment/cohesion + food-seeking
                       + soft boundary. Plain O(n²) neighbor search.
-  environment_mesh.cpp  Floor (jittered grid), 4 walls, plant blade — all
-                      built once at startup from the tank's half-extents
+  environment_mesh.cpp  Floor (jittered grid), 4 walls, plant blade, water
+                      surface grid — all built once at startup from the
+                      tank's half-extents
   plants.cpp         Random cluster scatter of plant instances (position,
                       height, hue, sway phase/amplitude/speed) — static data,
                       no update() needed
-  renderer.cpp        Two shaders (main + plant-with-sway), instanced draw
-                      calls, adaptive camera framing, opaque pass then
-                      alpha-blended glass walls last
+  renderer.cpp        Four shaders (main, plant-with-sway, wall-with-waterline-
+                      tint, water-with-ripple), instanced draw calls, adaptive
+                      camera framing, opaque pass then alpha-blended walls +
+                      water surface last (culling off for both)
 web/index.html       Reference JS harness — the whole contract a page needs
                      to drive this module (canvas setup, resize, RAF loop,
                      click -> ft_feed_at). Website's fish.html re-implements
@@ -58,6 +63,25 @@ web/index.html       Reference JS harness — the whole contract a page needs
 CMakeLists.txt       One file, two targets, switched on whether Emscripten
                      is the active toolchain (EMSCRIPTEN cmake var)
 ```
+
+## Debugging
+
+The native build can dump a screenshot headlessly (no browser, no display
+even — works fine under Xvfb) and exit:
+
+```bash
+xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 FISHTANK_SCREENSHOT=/tmp/shot.ppm \
+    timeout 3 ./build-native/fishtank_native
+python3 -c "from PIL import Image; Image.open('/tmp/shot.ppm').save('/tmp/shot.png')"
+```
+
+Prefer this over spinning up a browser for anything that's really about
+rendering correctness (geometry, winding, color, shader logic) — it's
+faster, and it sidesteps an entire category of browser-environment flakiness
+(see the WebGL context-loss gotcha below). Reserve actual browser testing
+(Playwright) for things that are genuinely web-specific: the JS glue in
+`web/index.html`, `ft_init`'s WebGL context creation, GLSL ES-only
+compilation issues.
 
 ## Commands
 
@@ -103,11 +127,25 @@ cd web && python3 -m http.server 8934   # open http://localhost:8934/
   CPU-side per-frame vertex recompute for plants — the whole point of doing
   it this way is that N swaying plants cost the same one instanced draw
   call as N static ones.
-- **Floor/wall/plant geometry is generated once in `Renderer::init()`**,
+- **Floor/wall/plant/water geometry is generated once in `Renderer::init()`**,
   not rebuilt per frame — they're static (floor/walls) or shader-animated
-  (plants), so there's nothing per-frame to regenerate. If a future change
-  needs the tank shape to be dynamic, that assumption has to be revisited
-  everywhere `init()` currently bakes in `sim.tankHalfExtents()`.
+  (plants, water), so there's nothing per-frame to regenerate. If a future
+  change needs the tank shape to be dynamic, that assumption has to be
+  revisited everywhere `init()` currently bakes in `sim.tankHalfExtents()`.
+- **The water ripple formula exists in two places that must stay
+  numerically identical**: `waterHeight()` in C++ (`renderer.cpp`, used by
+  `pickSurfacePoint`'s raymarch) and its GLSL twin `kWaterHeightGLSL`
+  (concatenated into both the wall and water vertex shaders at startup —
+  GLSL has no `#include`, hence the string concatenation in `init()` rather
+  than a shared source file). If you change one, change the other, or
+  clicking will silently stop matching what's actually drawn on screen —
+  the kind of bug that's easy to miss because both halves still "work" on
+  their own, they'd just quietly disagree about where the water is.
+- **`Boids::waterSurfaceY()` is the single source of truth for the still-
+  water height** — feedAt's spawn height, the water mesh's rest position,
+  and pickSurfacePoint's raymarch target all read it rather than each
+  hardcoding `halfExtents.y * 0.92f` separately (that used to be duplicated
+  in two places before this existed; don't reintroduce a third copy).
 
 ## Known gotchas (found by actually testing, not by reasoning about the code)
 
@@ -142,20 +180,36 @@ cd web && python3 -m http.server 8934   # open http://localhost:8934/
   stays fully in frame regardless of the embed's width/height.
 - **Feeding at the wrong spot was a camera-angle problem, not a math
   bug.** `ft_feed_at`/`feedAtScreen` resolve a click by ray-casting from the
-  camera through the click point and intersecting the tank's water-surface
-  plane (`Renderer::pickSurfacePoint`, `include/fishtank/math3d.h`'s
-  `invert()`). That's only numerically stable if the camera looks down at a
-  steep-enough angle: with a near-level camera, a ray traveling mostly along
-  -Z barely changes height per unit of depth, so solving "where does this
-  ray cross the surface plane" required extrapolating way outside the tank
-  (confirmed by printing the picked world coordinates — they came out in the
-  tens to hundreds of units for a tank with half-extent ~6). The fix was the
-  camera's `tilt` in `computeViewProj` (currently ~52°, chosen to clear the
-  FOV's half-angle by a wide margin — even the top-of-frame ray needs a
-  solidly downward angle, not just the center ray). If the tilt, FOV, or
-  aspect-fit math ever changes, re-check picking at the frame's edges and
-  corners, not just dead center — center clicks looked fine even when edge
-  clicks were wildly wrong.
+  camera through the click point and, originally, intersecting the tank's
+  water-surface plane analytically (`Renderer::pickSurfacePoint`,
+  `include/fishtank/math3d.h`'s `invert()`). That's only numerically stable
+  if the camera looks down at a steep-enough angle: with a near-level
+  camera, a ray traveling mostly along -Z barely changes height per unit of
+  depth, so solving "where does this ray cross the surface plane" required
+  extrapolating way outside the tank (confirmed by printing the picked
+  world coordinates — they came out in the tens to hundreds of units for a
+  tank with half-extent ~6). The fix was the camera's `tilt` in
+  `computeViewProj` (currently ~52° at rest, chosen to clear the FOV's
+  half-angle by a wide margin — even the top-of-frame ray needs a solidly
+  downward angle, not just the center ray). `pickSurfacePoint` has since
+  been rewritten to raymarch against the animated water surface instead of
+  a flat plane (see the water-mesh gotcha below), but the same underlying
+  angle-conditioning issue still applies to it, and the orbit's pitch clamp
+  exists for exactly this reason. If the tilt, FOV, or aspect-fit math ever
+  changes, re-check picking at the frame's edges and corners, not just dead
+  center — center clicks looked fine even when edge clicks were wildly
+  wrong.
+- **`pickSurfacePoint` raymarches, but only within a small window around an
+  analytic estimate — it does not march the whole click ray.** The near/far
+  clip points are ~0.1 and ~200 world units out, and marching that entire
+  span finely enough to resolve the water ripple's ~0.05-unit amplitude
+  would need an impractical step count. So it first solves the *flat*-water
+  intersection analytically (same formula as the old plane-only version)
+  purely to find *where* to march, then marches a ±2.5-unit window around
+  that estimate against the real (rippled) surface height, refining the
+  crossing by linear interpolation once bracketed. If the ripple amplitude
+  or the tank's proportions ever change substantially, re-check that the
+  window is still wide enough to actually contain the crossing.
 - Also note: `mx, my`/`clientX, clientY` from GLFW and the DOM are pixels
   from the **top-left**, but NDC is `[-1, 1]` with **+Y up** — the Y axis
   must be flipped when building `ndcY` (`main_native.cpp`'s
@@ -201,3 +255,19 @@ cd web && python3 -m http.server 8934   # open http://localhost:8934/
   (rather than just "a bit imprecise is fine"), the real fix is a better
   picking method for that regime (e.g. nearest point on the click ray to
   the tank's AABB), not re-narrowing this clamp back down.
+- **A long-lived browser tab (many reloads/navigations in one session) can
+  hit `CONTEXT_LOST_WEBGL` from the browser/GPU side, with nothing wrong in
+  the code.** Symptom: the page loads, JS reports success (`ft_init`
+  returns 1, the status text says "running"), the clear color even shows,
+  but nothing ever renders — and the console shows a `WebGL:
+  CONTEXT_LOST_WEBGL` warning, easy to miss since it's a warning, not an
+  error. Confirmed environmental, not a code bug, by reproducing it with
+  the exact last-known-good commit (no water/wall changes at all) in the
+  same aged browser session, and *not* reproducing it in a freshly launched
+  browser process running the same build. If a browser test ever goes
+  inexplicably blank mid-session: check the console for this specific
+  warning before assuming the just-written code is at fault, and prefer
+  killing/restarting the browser process over debugging the "bug" further.
+  This is also a good reason to lean on the native screenshot tool (see
+  "Debugging" above) for anything that doesn't specifically need a real
+  browser.

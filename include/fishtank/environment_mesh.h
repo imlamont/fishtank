@@ -27,4 +27,11 @@ std::vector<MeshVertex> buildWallsMesh(const Vec3& halfExtents);
 // local y as the bend weight — see Renderer's plant vertex shader.
 std::vector<MeshVertex> buildPlantBladeMesh();
 
+// A flat grid spanning the tank's XZ footprint, authored in LOCAL space at
+// y=0 (translate it to the water's rest height per instance). Subdivided
+// (not a single quad) so the renderer's ripple vertex shader has interior
+// vertices to displace — a single quad could only ever tilt at its 4
+// corners, not undulate.
+std::vector<MeshVertex> buildWaterMesh(const Vec3& halfExtents, int gridN);
+
 } // namespace ft

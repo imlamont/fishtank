@@ -39,6 +39,11 @@ public:
     const std::vector<Food>& food() const { return food_; }
     const Vec3& tankHalfExtents() const { return halfExtents_; }
 
+    // The still-water base height (before the renderer's animated ripple).
+    // Single source of truth shared by feedAt's spawn height, the water
+    // mesh's rest position, and pickSurfacePoint's raymarch target.
+    float waterSurfaceY() const { return halfExtents_.y * 0.92f; }
+
 private:
     void spawnFish(Fish& f);
 

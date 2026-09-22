@@ -3,8 +3,27 @@
 // around the tank, Esc or close the window to quit.
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <vector>
 #include "fishtank/gl_compat.h"
 #include "fishtank/app.h"
+
+namespace {
+// Dumps the current framebuffer to a PPM file — set FISHTANK_SCREENSHOT to a
+// path to capture one frame (after letting the sim settle a moment) and
+// exit. Useful for visually verifying rendering changes headlessly (e.g.
+// under Xvfb) without needing a browser at all.
+void dumpScreenshot(const char* path, int w, int h) {
+    std::vector<unsigned char> pixels(w * h * 3);
+    glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+    FILE* f = std::fopen(path, "wb");
+    if (!f) return;
+    std::fprintf(f, "P6\n%d %d\n255\n", w, h);
+    // glReadPixels rows are bottom-to-top; PPM wants top-to-bottom.
+    for (int y = h - 1; y >= 0; --y) std::fwrite(&pixels[y * w * 3], 1, w * 3, f);
+    std::fclose(f);
+}
+} // namespace
 
 namespace {
 ft::App g_app;
@@ -119,6 +138,12 @@ int main() {
         lastTime = now;
 
         g_app.frame(dt);
+
+        const char* shotPath = std::getenv("FISHTANK_SCREENSHOT");
+        if (shotPath && now > 1.0) { // let a frame or two of sim settle first
+            dumpScreenshot(shotPath, g_width, g_height);
+            break;
+        }
 
         glfwSwapBuffers(window);
         glfwPollEvents();

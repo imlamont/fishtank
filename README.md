@@ -32,8 +32,8 @@ versa — reimplement that too, don't just wire `ft_feed_at` to `pointerdown`.
 
 ```
 include/fishtank/   Headers: math3d, boids (sim), fish_mesh, environment_mesh
-                     (floor/walls/plant blade), plants (scatter data), shader,
-                     renderer, app, gl_compat/gl_loader
+                     (floor/walls/plant blade/water grid), plants (scatter
+                     data), shader, renderer, app, gl_compat/gl_loader
 src/                 Implementation + the two entry points:
                        main_web.cpp     Emscripten build, exports the C API above
                        main_native.cpp  GLFW desktop window, for fast local iteration
@@ -54,7 +54,15 @@ the same calls as real linked symbols, so `gl_compat.h` picks the right path.
 sudo apt-get install -y cmake libglfw3-dev   # once
 cmake -S . -B build-native
 cmake --build build-native -j
-./build-native/fishtank_native   # click to feed, Esc to quit
+./build-native/fishtank_native   # click to feed, drag to orbit, Esc to quit
+```
+
+It can also dump a single frame to a PPM and exit — no display/browser
+needed at all, works fine under `xvfb-run` — which is the fastest way to
+check a rendering change:
+
+```bash
+FISHTANK_SCREENSHOT=/tmp/shot.ppm ./build-native/fishtank_native
 ```
 
 ### WebAssembly
@@ -102,11 +110,25 @@ cd web && python3 -m http.server 8934
 - Fish are procedural low-poly meshes (`fish_mesh.cpp`), not sourced assets,
   instanced via a single dynamic-per-frame instance buffer (position +
   orientation + per-fish hue color).
-- The sandy floor (jittered grid), 4 glass walls, and plant blades are all
-  procedural too (`environment_mesh.cpp`), built once from the tank's
-  half-extents — nothing per-frame to regenerate. Plants are scattered in
-  loose random clusters at startup (`plants.cpp`, `Plants` class) and sway
-  entirely in the vertex shader (`kPlantVertSrc` in `renderer.cpp`) driven
-  by each instance's own phase/amplitude/speed — no per-frame CPU work
-  scales with plant count. Walls render last, alpha-blended, with depth
-  writes off so they don't occlude the fish/floor/plants behind them.
+- The sandy floor (jittered grid), 4 glass walls, plant blades, and the
+  water surface are all procedural too (`environment_mesh.cpp`), built once
+  from the tank's half-extents — nothing per-frame to regenerate. Plants
+  are scattered in loose random clusters at startup (`plants.cpp`, `Plants`
+  class) and sway entirely in the vertex shader (`kPlantVertSrc` in
+  `renderer.cpp`) driven by each instance's own phase/amplitude/speed — no
+  per-frame CPU work scales with plant count.
+- The water surface ripples via the same technique (vertex-shader
+  displacement using a small sum of sines, `waterHeight()`), and clicking
+  resolves against that *actual animated surface* — `pickSurfacePoint`
+  raymarches the click ray against it rather than intersecting a flat
+  plane, so feeding stays accurate to what's on screen even as the surface
+  moves. The C++ and GLSL copies of the ripple formula must stay in sync
+  (see CLAUDE.md).
+- Walls and the water surface render last, alpha-blended, with depth writes
+  off so they don't occlude the fish/floor/plants behind them, and with
+  backface culling off so both are visible from either side (the tank's
+  glass from odd orbit angles or from inside; the water surface if the
+  camera ever ends up beneath it at the wide pitch range the orbit
+  supports). Walls are tinted per-vertex — white above the waterline
+  (`Boids::waterSurfaceY()`), blue below it — computed in the wall
+  shader from world height relative to that same animated surface.

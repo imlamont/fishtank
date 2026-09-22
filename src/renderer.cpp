@@ -3,6 +3,7 @@
 #include "fishtank/environment_mesh.h"
 #include <cmath>
 #include <cstddef>
+#include <string>
 
 namespace ft {
 
@@ -78,6 +79,94 @@ void main() {
     vec4 worldPos = model * vec4(bentPos, 1.0);
     gl_Position = uViewProj * worldPos;
     vNormal = mat3(model) * aNormal;
+    vColor = aColor;
+}
+)GLSL";
+
+// The water's shared ripple formula — this exact formula also lives in
+// kWaterVertSrc/kWallVertSrc as GLSL. The two MUST stay in sync (see
+// CLAUDE.md): this copy is what pickSurfacePoint raymarches against, the
+// GLSL copy is what's actually drawn, and picking silently drifting from
+// what's visually on screen would be a much worse bug than either copy
+// alone. Small, smooth, dependency-free — a couple of overlapping sines
+// rather than anything physically simulated.
+float waterHeight(float x, float z, float t) {
+    return 0.05f * std::sin(x * 0.8f + t * 1.3f) * std::sin(z * 0.7f + t * 0.9f + 1.0f) +
+           0.025f * std::sin(x * 1.7f - t * 2.1f + z * 0.5f);
+}
+
+// The GLSL twin of the C++ waterHeight() above — must stay numerically
+// identical (see the comment on that function). Renderer::init() prepends
+// this to kWallVertSrc/kWaterVertSrc before compiling them (string
+// concatenation, not a preprocessor include — GLSL has no #include), which
+// is why those two don't define waterHeight() themselves despite calling it.
+const char* kWaterHeightGLSL = R"GLSL(
+float waterHeight(float x, float z, float t) {
+    return 0.05 * sin(x * 0.8 + t * 1.3) * sin(z * 0.7 + t * 0.9 + 1.0) +
+           0.025 * sin(x * 1.7 - t * 2.1 + z * 0.5);
+}
+)GLSL";
+
+// Walls are drawn already in world space (model is identity — see render()),
+// so aPos IS worldPos here. Color isn't taken from the instance at all:
+// it's computed per-vertex from world height relative to the animated water
+// surface — white above the waterline, blue below it (frosted-glass rim vs.
+// submerged glass) — per the look the walls are going for.
+const char* kWallVertSrc = R"GLSL(
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec4 aModelCol0;
+layout(location = 3) in vec4 aModelCol1;
+layout(location = 4) in vec4 aModelCol2;
+layout(location = 5) in vec4 aModelCol3;
+layout(location = 6) in vec3 aColor;
+
+uniform mat4 uViewProj;
+uniform float uTime;
+uniform float uWaterBaseY;
+
+out vec3 vNormal;
+out vec3 vColor;
+
+void main() {
+    mat4 model = mat4(aModelCol0, aModelCol1, aModelCol2, aModelCol3);
+    vec4 worldPos = model * vec4(aPos, 1.0);
+    gl_Position = uViewProj * worldPos;
+    vNormal = mat3(model) * aNormal;
+
+    float waterY = uWaterBaseY + waterHeight(worldPos.x, worldPos.z, uTime);
+    float aboveWater = smoothstep(waterY - 0.15, waterY + 0.15, worldPos.y);
+    vec3 blueColor = vec3(0.42, 0.62, 0.82);
+    vec3 whiteColor = vec3(0.93, 0.95, 0.97);
+    vColor = mix(blueColor, whiteColor, aboveWater);
+}
+)GLSL";
+
+// Water mesh is authored flat (local y = 0) and translated to the water's
+// rest height per instance; the ripple is added here in world space, after
+// the model transform, the same pattern kPlantVertSrc uses for sway.
+const char* kWaterVertSrc = R"GLSL(
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec4 aModelCol0;
+layout(location = 3) in vec4 aModelCol1;
+layout(location = 4) in vec4 aModelCol2;
+layout(location = 5) in vec4 aModelCol3;
+layout(location = 6) in vec3 aColor;
+
+uniform mat4 uViewProj;
+uniform float uTime;
+
+out vec3 vNormal;
+out vec3 vColor;
+
+void main() {
+    mat4 model = mat4(aModelCol0, aModelCol1, aModelCol2, aModelCol3);
+    vec4 basePos = model * vec4(aPos, 1.0);
+    float h = waterHeight(basePos.x, basePos.z, uTime);
+    vec3 worldPos = vec3(basePos.x, basePos.y + h, basePos.z);
+    gl_Position = uViewProj * vec4(worldPos, 1.0);
+    vNormal = aNormal; // approximate: ignores the ripple's slope, kept simple on purpose
     vColor = aColor;
 }
 )GLSL";
@@ -181,6 +270,13 @@ bool Renderer::init(const Boids& sim) {
     if (!shader_.compile(kVertSrc, kFragSrc)) return false;
     if (!plantShader_.compile(kPlantVertSrc, kFragSrc)) return false;
 
+    // See kWaterHeightGLSL's comment: GLSL has no #include, so this is
+    // plain string concatenation done once at startup, not per frame.
+    std::string wallVertSrc = std::string(kWaterHeightGLSL) + kWallVertSrc;
+    std::string waterVertSrc = std::string(kWaterHeightGLSL) + kWaterVertSrc;
+    if (!wallShader_.compile(wallVertSrc.c_str(), kFragSrc)) return false;
+    if (!waterShader_.compile(waterVertSrc.c_str(), kFragSrc)) return false;
+
     fishMesh_ = createMesh(buildFishMesh(), kMaxFishInstances);
     foodMesh_ = createMesh(buildOctahedronMesh(0.06f), kMaxFoodInstances);
 
@@ -188,6 +284,7 @@ bool Renderer::init(const Boids& sim) {
     floorMesh_ = createMesh(buildFloorMesh(half, 10, 1234u), 1);
     wallsMesh_ = createMesh(buildWallsMesh(half), 1);
     plantMesh_ = createMesh(buildPlantBladeMesh(), kMaxPlantInstances, 3);
+    waterMesh_ = createMesh(buildWaterMesh(half, 14), 1);
     plants_ = std::make_unique<Plants>(kMaxPlantInstances / 2, half, 4321u);
 
     glEnable(GL_DEPTH_TEST);
@@ -278,12 +375,53 @@ Vec3 Renderer::pickSurfacePoint(float ndcX, float ndcY, const Boids& sim, float 
     Vec3 nearWorld(nearWorld4.x / nearWorld4.w, nearWorld4.y / nearWorld4.w, nearWorld4.z / nearWorld4.w);
     Vec3 farWorld(farWorld4.x / farWorld4.w, farWorld4.y / farWorld4.w, farWorld4.z / farWorld4.w);
 
-    Vec3 ray = farWorld - nearWorld;
-    // Intersect with the same height food actually spawns at (see Boids::feedAt).
-    float planeY = sim.tankHalfExtents().y * 0.92f;
-    if (std::fabs(ray.y) < 1e-6f) return Vec3(nearWorld.x, planeY, nearWorld.z);
-    float t = (planeY - nearWorld.y) / ray.y;
-    return Vec3(nearWorld.x + ray.x * t, planeY, nearWorld.z + ray.z * t);
+    Vec3 fullRay = farWorld - nearWorld;
+    float fullLen = fullRay.length();
+    Vec3 dir = fullLen > 1e-6f ? fullRay * (1.0f / fullLen) : Vec3(0, -1, 0);
+
+    // The near/far clip points sit at world-space depths of ~0.1 and ~200
+    // (see computeViewProj's perspective near/far), so the full clip-to-clip
+    // ray spans far more distance than the tank occupies. Marching that
+    // whole span at fine-enough resolution to resolve the ripple (whose
+    // amplitude is ~0.05 world units) would need a huge step count, so
+    // instead: solve the flat-water-level analytically first just to find
+    // *where* along the ray to march, then march a small bounded window
+    // around that estimate against the real (rippled) surface. This is a
+    // real raymarch, not the old direct analytic solve — it's just bounded
+    // by an analytic estimate rather than searching the entire ray, purely
+    // for efficiency.
+    float baseY = sim.waterSurfaceY();
+    float estimateT = std::fabs(dir.y) > 1e-6f ? (baseY - nearWorld.y) / dir.y : fullLen * 0.5f;
+    estimateT = std::max(0.0f, std::min(fullLen, estimateT));
+
+    auto heightDiff = [&](float t) {
+        Vec3 p = nearWorld + dir * t;
+        return p.y - (baseY + waterHeight(p.x, p.z, timeSeconds));
+    };
+
+    const float windowHalf = 2.5f; // world units — comfortably more than the ripple amplitude
+    const int steps = 32;
+    float t0 = std::max(0.0f, estimateT - windowHalf);
+    float t1 = std::min(fullLen, estimateT + windowHalf);
+    float step = (t1 - t0) / steps;
+
+    float prevT = t0;
+    float prevDiff = heightDiff(t0);
+    float hitT = estimateT; // fallback: the flat-water estimate, if no crossing is found in-window
+    for (int i = 1; i <= steps; ++i) {
+        float t = t0 + step * i;
+        float diff = heightDiff(t);
+        if ((diff > 0.0f) != (prevDiff > 0.0f)) {
+            float frac = prevDiff / (prevDiff - diff); // linear interpolation to the crossing
+            hitT = prevT + (t - prevT) * frac;
+            break;
+        }
+        prevT = t;
+        prevDiff = diff;
+    }
+
+    Vec3 hit = nearWorld + dir * hitT;
+    return Vec3(hit.x, baseY + waterHeight(hit.x, hit.z, timeSeconds), hit.z);
 }
 
 void Renderer::render(const Boids& sim, float timeSeconds) {
@@ -359,23 +497,43 @@ void Renderer::render(const Boids& sim, float timeSeconds) {
     }
     glEnable(GL_CULL_FACE);
 
-    // --- Transparent pass: glass walls, drawn last, blended over everything
-    // above without occluding it (depth test stays on so walls still hide
-    // correctly behind each other and the floor, but depth WRITE is off so
-    // a wall never blocks something behind it that hasn't drawn yet). ---
-    shader_.use();
-    glUniform1f(shader_.uniformLocation("uAlpha"), 0.22f);
+    // --- Transparent pass: glass walls + water surface, drawn last, blended
+    // over everything above without occluding it (depth test stays on so
+    // these still hide correctly behind each other and the floor, but depth
+    // WRITE is off so neither blocks something behind it that hasn't drawn
+    // yet). Culling is off for both: walls need their back face visible too
+    // (seen from odd orbit angles, or simply the inside surface facing the
+    // fish), and the water plane can end up viewed from underneath at the
+    // wide pitch range the camera now supports. ---
+    glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE);
 
+    wallShader_.use();
+    glUniformMatrix4fv(wallShader_.uniformLocation("uViewProj"), 1, GL_FALSE, viewProj.m);
+    glUniform1f(wallShader_.uniformLocation("uAlpha"), 0.22f);
+    glUniform1f(wallShader_.uniformLocation("uTime"), timeSeconds);
+    glUniform1f(wallShader_.uniformLocation("uWaterBaseY"), sim.waterSurfaceY());
+
     instanceScratch_.clear();
-    writeInstance(instanceScratch_, Mat4::identity(), Vec3(0.55f, 0.75f, 0.85f)); // pale glass-blue
+    writeInstance(instanceScratch_, Mat4::identity(), Vec3(0, 0, 0)); // color is computed in-shader, not from this
     uploadInstances(wallsMesh_, instanceScratch_.data(), instanceScratch_.size() * sizeof(float));
     drawInstanced(wallsMesh_, 1);
 
+    waterShader_.use();
+    glUniformMatrix4fv(waterShader_.uniformLocation("uViewProj"), 1, GL_FALSE, viewProj.m);
+    glUniform1f(waterShader_.uniformLocation("uAlpha"), 0.35f);
+    glUniform1f(waterShader_.uniformLocation("uTime"), timeSeconds);
+
+    instanceScratch_.clear();
+    writeInstance(instanceScratch_, Mat4::translation(Vec3(0, sim.waterSurfaceY(), 0)), Vec3(0.35f, 0.65f, 0.85f));
+    uploadInstances(waterMesh_, instanceScratch_.data(), instanceScratch_.size() * sizeof(float));
+    drawInstanced(waterMesh_, 1);
+
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
+    glEnable(GL_CULL_FACE);
 }
 
 Renderer::~Renderer() {
@@ -389,6 +547,7 @@ Renderer::~Renderer() {
     destroy(floorMesh_);
     destroy(wallsMesh_);
     destroy(plantMesh_);
+    destroy(waterMesh_);
 }
 
 } // namespace ft

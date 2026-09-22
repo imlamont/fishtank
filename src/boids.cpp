@@ -60,7 +60,7 @@ void Boids::feedAt(float worldX, float worldZ) {
     for (int i = 0; i < pellets; ++i) {
         Food food;
         food.pos = Vec3(worldX + (randf() - 0.5f) * 0.5f,
-                         halfExtents_.y * 0.92f,
+                         waterSurfaceY(),
                          worldZ + (randf() - 0.5f) * 0.5f);
         food.vel = Vec3((randf() - 0.5f) * 0.1f, -0.15f - randf() * 0.1f, (randf() - 0.5f) * 0.1f);
         food.life = kFoodLifetime;
