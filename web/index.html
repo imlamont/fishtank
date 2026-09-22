@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>fishtank — local test harness</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b1620; color: #e6e6e6; font-family: system-ui, sans-serif; }
+  #wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  #canvas-holder { flex: 1; position: relative; min-height: 0; }
+  canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
+  #hud { padding: 10px 14px; background: #121212; border-top: 1px solid #2a2a2a; font-size: 14px; }
+  button { background: #60a5fa; color: #0b1620; border: none; border-radius: 6px; padding: 8px 16px; font-weight: 600; cursor: pointer; }
+  button:hover { filter: brightness(1.1); }
+  #status { opacity: 0.7; margin-left: 12px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="canvas-holder"><canvas id="fishtank-canvas"></canvas></div>
+  <div id="hud">
+    <button id="feed-btn">Feed the fish</button>
+    <span id="status">loading…</span>
+    <span style="float:right; opacity:0.6">click/tap the tank to drop food anywhere</span>
+  </div>
+</div>
+
+<script src="fishtank.js"></script>
+<script>
+  const canvas = document.getElementById('fishtank-canvas');
+  const statusEl = document.getElementById('status');
+  const feedBtn = document.getElementById('feed-btn');
+
+  function resizeCanvas(Module) {
+    const holder = document.getElementById('canvas-holder');
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.round(holder.clientWidth * dpr);
+    const h = Math.round(holder.clientHeight * dpr);
+    if (canvas.width === w && canvas.height === h) return;
+    canvas.width = w;
+    canvas.height = h;
+    if (Module) Module.ccall('ft_resize', null, ['number', 'number'], [w, h]);
+  }
+
+  FishtankModule().then((Module) => {
+    resizeCanvas(null);
+    const ok = Module.ccall('ft_init', 'number',
+      ['string', 'number', 'number'],
+      ['#fishtank-canvas', canvas.width, canvas.height]);
+
+    if (!ok) {
+      statusEl.textContent = 'failed to init WebGL2 — check console';
+      return;
+    }
+    statusEl.textContent = 'running';
+
+    window.addEventListener('resize', () => resizeCanvas(Module));
+
+    feedBtn.addEventListener('click', () => {
+      // Drop a pinch of food at a random-ish spot near center.
+      const nx = (Math.random() * 2 - 1) * 0.6;
+      const nz = (Math.random() * 2 - 1) * 0.6;
+      Module.ccall('ft_feed_at', null, ['number', 'number'], [nx, nz]);
+    });
+
+    canvas.addEventListener('pointerdown', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const nz = ((e.clientY - rect.top) / rect.height) * 2 - 1;
+      Module.ccall('ft_feed_at', null, ['number', 'number'], [nx, nz]);
+    });
+
+    let lastMs = performance.now();
+    function tick(nowMs) {
+      const dt = Math.min((nowMs - lastMs) / 1000, 0.05);
+      lastMs = nowMs;
+      Module.ccall('ft_frame', null, ['number'], [dt]);
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  });
+</script>
+</body>
+</html>

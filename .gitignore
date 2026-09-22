@@ -1,0 +1,8 @@
+build-native/
+build-web/
+compile_commands.json
+
+# Compiled wasm artifacts copied into web/ for local browser testing —
+# rebuild with the emscripten target, don't commit the output.
+web/fishtank.js
+web/fishtank.wasm

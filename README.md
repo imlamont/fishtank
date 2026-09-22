@@ -1,0 +1,93 @@
+# fishtank
+
+An interactive school of fish, simulated and rendered entirely in C++,
+compiled to WebAssembly for [imlamont.com](https://imlamont.com). Boids-style
+flocking + a small custom renderer talking straight to WebGL2/GLES3 — no JS
+rendering framework in the loop.
+
+## Boundary with the website
+
+This module only simulates and renders. It knows nothing about the feed
+button's UI, the visitor name/email log, or any network calls — those live
+in the website repo's own JS/HTML. This repo exposes a small C API and a
+canvas; the embedding page drives it:
+
+```c
+int  ft_init(const char* canvasSelector, int widthPx, int heightPx); // 1 = ok
+void ft_frame(float dtSeconds);           // call once per requestAnimationFrame
+void ft_resize(int widthPx, int heightPx);
+void ft_feed_at(float nx, float nz);      // nx, nz in [-1, 1]: drop position across the tank
+void ft_set_fish_count(int count);
+```
+
+See `web/index.html` for the reference wiring — that's the whole JS contract
+the website needs to reimplement (canvas setup, resize, RAF loop, click ->
+`ft_feed_at`).
+
+## Layout
+
+```
+include/fishtank/   Headers: math3d, boids (sim), fish_mesh, shader, renderer, app, gl_compat/gl_loader
+src/                 Implementation + the two entry points:
+                       main_web.cpp     Emscripten build, exports the C API above
+                       main_native.cpp  GLFW desktop window, for fast local iteration
+web/index.html       Minimal browser test harness (loads fishtank.js/.wasm, wires the button + canvas)
+CMakeLists.txt       One file, two targets depending on whether Emscripten is the active toolchain
+```
+
+There's no GLEW/glad dependency for the native build — `src/gl_loader.cpp` is
+a ~30-function loader for exactly what this project calls, resolved at
+runtime via `glfwGetProcAddress`. Under Emscripten, `<GLES3/gl3.h>` provides
+the same calls as real linked symbols, so `gl_compat.h` picks the right path.
+
+## Building
+
+### Native (fast iteration, no browser needed)
+
+```bash
+sudo apt-get install -y cmake libglfw3-dev   # once
+cmake -S . -B build-native
+cmake --build build-native -j
+./build-native/fishtank_native   # click to feed, Esc to quit
+```
+
+### WebAssembly
+
+```bash
+git clone https://github.com/emscripten-core/emsdk.git ~/emsdk   # once
+~/emsdk/emsdk install latest && ~/emsdk/emsdk activate latest    # once
+source ~/emsdk/emsdk_env.sh
+
+emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release
+cmake --build build-web -j
+```
+
+Produces `build-web/fishtank.js` and `build-web/fishtank.wasm`. Those two
+files are what get copied into the website repo as a resource — nothing else
+from this repo ships.
+
+To try it in a real browser before copying anything over:
+
+```bash
+cp build-web/fishtank.js build-web/fishtank.wasm web/
+cd web && python3 -m http.server 8934
+# open http://localhost:8934/
+```
+
+## Simulation notes
+
+- `Boids::update()` is plain O(n²) neighbor search (separation/alignment/
+  cohesion) plus a food-seeking force and a soft boundary push-back. Fine at
+  the current ~100-150 fish scale; would need spatial partitioning well
+  beyond that.
+- Food pellets drop from the tank surface at the clicked/fed x/z, sink, and
+  either get eaten (fish within `kFoodEatRadius`) or expire after
+  `kFoodLifetime` seconds.
+- The whole school behaves as one flocking body and can drift toward a tank
+  wall over time — that's realistic boids behavior, not a bug. The camera
+  distance is derived each frame from the tank's half-extents and the
+  current aspect ratio (`Renderer::render` in `src/renderer.cpp`) so the
+  full tank stays framed regardless of the embed's width/height.
+- Fish are procedural low-poly meshes (`fish_mesh.cpp`), not sourced assets,
+  instanced via a single dynamic-per-frame instance buffer (position +
+  orientation + per-fish hue color).
