@@ -108,10 +108,13 @@ float waterHeight(float x, float z, float t) {
 )GLSL";
 
 // Walls are drawn already in world space (model is identity — see render()),
-// so aPos IS worldPos here. Color isn't taken from the instance at all:
-// it's computed per-vertex from world height relative to the animated water
-// surface — white above the waterline, blue below it (frosted-glass rim vs.
-// submerged glass) — per the look the walls are going for.
+// so aPos IS worldPos here. Unlike the other shaders, color AND alpha are
+// computed in the fragment stage (kWallFragSrc) from the interpolated
+// world position, not per-vertex here — the wall mesh is just 2 triangles
+// (4 corners) per face, so a per-vertex waterline/floor-line calculation
+// would linearly interpolate across the *entire* wall height instead of
+// forming the intended sharp band; per-fragment interpolation of a planar
+// quad's world position is exact regardless of how few vertices it has.
 const char* kWallVertSrc = R"GLSL(
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
@@ -122,23 +125,52 @@ layout(location = 5) in vec4 aModelCol3;
 layout(location = 6) in vec3 aColor;
 
 uniform mat4 uViewProj;
-uniform float uTime;
-uniform float uWaterBaseY;
 
 out vec3 vNormal;
-out vec3 vColor;
+out vec3 vWorldPos;
 
 void main() {
     mat4 model = mat4(aModelCol0, aModelCol1, aModelCol2, aModelCol3);
     vec4 worldPos = model * vec4(aPos, 1.0);
     gl_Position = uViewProj * worldPos;
     vNormal = mat3(model) * aNormal;
+    vWorldPos = worldPos.xyz;
+}
+)GLSL";
 
-    float waterY = uWaterBaseY + waterHeight(worldPos.x, worldPos.z, uTime);
-    float aboveWater = smoothstep(waterY - 0.15, waterY + 0.15, worldPos.y);
+// Companion fragment shader for the walls: white above the (animated)
+// waterline, blue below it — same as before — but now also fading to
+// fully opaque near/below the floor, so the sand's edge doesn't show
+// through the glass at the bottom of the tank the way a uniformly
+// translucent wall would.
+const char* kWallFragSrc = R"GLSL(
+in vec3 vNormal;
+in vec3 vWorldPos;
+out vec4 fragColor;
+
+uniform float uAlpha;
+uniform float uTime;
+uniform float uWaterBaseY;
+uniform float uFloorY;
+
+void main() {
+    vec3 n = normalize(vNormal);
+    vec3 lightDir = normalize(vec3(0.4, 0.9, 0.3));
+    float diff = max(dot(n, lightDir), 0.0);
+
+    float waterY = uWaterBaseY + waterHeight(vWorldPos.x, vWorldPos.z, uTime);
+    float aboveWater = smoothstep(waterY - 0.15, waterY + 0.15, vWorldPos.y);
     vec3 blueColor = vec3(0.42, 0.62, 0.82);
     vec3 whiteColor = vec3(0.93, 0.95, 0.97);
-    vColor = mix(blueColor, whiteColor, aboveWater);
+    vec3 baseColor = mix(blueColor, whiteColor, aboveWater);
+    vec3 color = baseColor * 0.35 + baseColor * diff * 0.85;
+
+    // Opaque right at the floor, translucent (uAlpha) a bit above it —
+    // hides the sand's edge instead of showing it through clear glass.
+    float translucentFactor = smoothstep(uFloorY, uFloorY + 1.0, vWorldPos.y);
+    float alpha = mix(1.0, uAlpha, translucentFactor);
+
+    fragColor = vec4(color, alpha);
 }
 )GLSL";
 
@@ -272,9 +304,9 @@ bool Renderer::init(const Boids& sim) {
 
     // See kWaterHeightGLSL's comment: GLSL has no #include, so this is
     // plain string concatenation done once at startup, not per frame.
-    std::string wallVertSrc = std::string(kWaterHeightGLSL) + kWallVertSrc;
+    std::string wallFragSrc = std::string(kWaterHeightGLSL) + kWallFragSrc;
     std::string waterVertSrc = std::string(kWaterHeightGLSL) + kWaterVertSrc;
-    if (!wallShader_.compile(wallVertSrc.c_str(), kFragSrc)) return false;
+    if (!wallShader_.compile(kWallVertSrc, wallFragSrc.c_str())) return false;
     if (!waterShader_.compile(waterVertSrc.c_str(), kFragSrc)) return false;
 
     fishMesh_ = createMesh(buildFishMesh(), kMaxFishInstances);
@@ -440,6 +472,12 @@ void Renderer::render(const Boids& sim, float timeSeconds) {
     uploadInstances(floorMesh_, instanceScratch_.data(), instanceScratch_.size() * sizeof(float));
     drawInstanced(floorMesh_, 1);
 
+    // The body is a closed bipyramid (culling is fine there), but the
+    // dorsal/pectoral/tail fins are flat single-sided triangles — with
+    // culling on, a fin facing away from the camera at any given moment
+    // (which happens constantly as fish turn) would simply vanish. Same
+    // fix as the plants below: just don't cull this draw.
+    glDisable(GL_CULL_FACE);
     instanceScratch_.clear();
     int fishCount = 0;
     for (const auto& f : sim.fish()) {
@@ -454,6 +492,7 @@ void Renderer::render(const Boids& sim, float timeSeconds) {
         uploadInstances(fishMesh_, instanceScratch_.data(), instanceScratch_.size() * sizeof(float));
         drawInstanced(fishMesh_, fishCount);
     }
+    glEnable(GL_CULL_FACE);
 
     instanceScratch_.clear();
     int foodCount = 0;
@@ -515,6 +554,7 @@ void Renderer::render(const Boids& sim, float timeSeconds) {
     glUniform1f(wallShader_.uniformLocation("uAlpha"), 0.22f);
     glUniform1f(wallShader_.uniformLocation("uTime"), timeSeconds);
     glUniform1f(wallShader_.uniformLocation("uWaterBaseY"), sim.waterSurfaceY());
+    glUniform1f(wallShader_.uniformLocation("uFloorY"), -sim.tankHalfExtents().y);
 
     instanceScratch_.clear();
     writeInstance(instanceScratch_, Mat4::identity(), Vec3(0, 0, 0)); // color is computed in-shader, not from this

@@ -108,8 +108,12 @@ std::vector<MeshVertex> buildWaterMesh(const Vec3& halfExtents, int gridN) {
     return verts;
 }
 
-std::vector<MeshVertex> buildPlantBladeMesh() {
-    std::vector<MeshVertex> verts;
+namespace {
+
+// One flat tapering panel, in the local XY plane (z=0) — the single-panel
+// version this used to be, factored out so buildPlantBladeMesh can cross
+// two of them.
+void appendFlatBladePanel(std::vector<MeshVertex>& verts) {
     const int segments = 5;
     const float baseWidth = 0.12f;
 
@@ -126,6 +130,29 @@ std::vector<MeshVertex> buildPlantBladeMesh() {
         pushTri(verts, a, b, c);
         pushTri(verts, a, c, d);
     }
+}
+
+} // namespace
+
+std::vector<MeshVertex> buildPlantBladeMesh() {
+    // A single flat panel reads as a razor-thin line when viewed edge-on —
+    // there's no way for a flat quad to look 3D from every horizontal
+    // angle. Crossing two panels at 90 degrees (the classic billboard-
+    // grass trick) gives real volume from any side, cheaply: still just 2
+    // panels, and backface culling is already off for plants so both
+    // faces of both panels render.
+    std::vector<MeshVertex> verts;
+    appendFlatBladePanel(verts);
+
+    // Rotate this first panel's vertices 90 degrees around Y (local up),
+    // then add a second, unrotated panel — together they form an X-shaped
+    // cross-section.
+    for (auto& v : verts) {
+        float x = v.px, z = v.pz, nx = v.nx, nz = v.nz;
+        v.px = -z; v.pz = x;
+        v.nx = -nz; v.nz = nx;
+    }
+    appendFlatBladePanel(verts);
     return verts;
 }
 

@@ -152,12 +152,26 @@ cd web && python3 -m http.server 8934   # open http://localhost:8934/
 - **The water ripple formula exists in two places that must stay
   numerically identical**: `waterHeight()` in C++ (`renderer.cpp`, used by
   `pickSurfacePoint`'s raymarch) and its GLSL twin `kWaterHeightGLSL`
-  (concatenated into both the wall and water vertex shaders at startup —
-  GLSL has no `#include`, hence the string concatenation in `init()` rather
-  than a shared source file). If you change one, change the other, or
-  clicking will silently stop matching what's actually drawn on screen —
-  the kind of bug that's easy to miss because both halves still "work" on
-  their own, they'd just quietly disagree about where the water is.
+  (concatenated at startup into the water *vertex* shader, which displaces
+  ripple geometry, and the wall *fragment* shader, which uses it to find
+  the local waterline for the white/blue color split — GLSL has no
+  `#include`, hence the string concatenation in `init()` rather than a
+  shared source file). If you change one, change the other, or clicking
+  will silently stop matching what's actually drawn on screen — the kind
+  of bug that's easy to miss because both halves still "work" on their
+  own, they'd just quietly disagree about where the water is.
+- **The wall shader computes color and alpha per-*fragment*, not
+  per-vertex** (`kWallFragSrc`, taking an interpolated `vWorldPos` from
+  `kWallVertSrc`) — deliberately, even though every other shader here does
+  its work in the vertex stage. The wall mesh is just 2 triangles (4
+  corners) per face; a per-vertex waterline or floor-opacity calculation
+  would only ever have two distinct Y values to interpolate between (the
+  top and bottom corners), smearing what's supposed to be a *sharp* band
+  (the waterline, the floor's opaque strip) into a gradient spanning the
+  wall's entire height. Per-fragment interpolation of a planar quad's
+  world position is exact regardless of vertex count, so this was the
+  actual fix, not just a style choice — don't move this logic back into
+  the vertex stage "to match the other shaders."
 - **`Boids::waterSurfaceY()` is the single source of truth for the still-
   water height** — feedAt's spawn height, the water mesh's rest position,
   and pickSurfacePoint's raymarch target all read it rather than each
@@ -304,3 +318,25 @@ cd web && python3 -m http.server 8934   # open http://localhost:8934/
   This is also a good reason to lean on the native screenshot tool (see
   "Debugging" above) for anything that doesn't specifically need a real
   browser.
+- **Any flat, single-sided mesh needs backface culling disabled for its
+  draw call, full stop** — this has now bitten plants, the fish fins, and
+  would bite anything else built the same way. A closed volume (the fish
+  body, the food octahedron) is fine with culling on since its backfaces
+  are always hidden behind its own front faces anyway; a flat panel (a fin,
+  a plant blade) has no "inside" to hide behind, so whichever side happens
+  to face away from the camera at a given moment — which changes
+  constantly for anything that moves or rotates, like a turning fish —
+  just vanishes. If a new flat decorative element gets added, disable
+  culling for its draw the same way `render()` already does for fish and
+  plants; don't assume it's fine because the mesh "looks" like it has two
+  sides in the modeling code.
+- **A single flat quad cannot look 3D from every horizontal angle, no
+  matter how it's shaded** — viewed edge-on it's always a line, because
+  it has zero thickness in that direction. The plant blades were flat
+  single panels for exactly this reason (looked fine from the front,
+  vanished to a sliver from the side) until `buildPlantBladeMesh` was
+  changed to cross two panels at 90 degrees (the classic billboard-grass
+  technique). If something needs to read as volumetric from any horizontal
+  viewing angle without real 3D geometry, this cross-quad pattern is the
+  cheap way to get there — a single panel isn't a smaller version of the
+  same effect, it's a fundamentally different (and broken) one.
