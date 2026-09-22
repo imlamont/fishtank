@@ -10,10 +10,11 @@ constexpr float kMinSpeed = 0.5f;
 constexpr float kMaxForce = 2.2f;
 constexpr float kNeighborRadius = 1.6f;
 constexpr float kSeparationRadius = 0.55f;
-constexpr float kFoodAttractRadius = 6.0f;
 constexpr float kFoodEatRadius = 0.35f;
 constexpr float kFoodLifetime = 14.0f;
 constexpr float kBoundaryMargin = 1.2f;
+constexpr float kMinModeSeconds = 1.0f;
+constexpr float kMaxModeSeconds = 10.0f;
 } // namespace
 
 Boids::Boids(int fishCount, const Vec3& tankHalfExtents)
@@ -38,6 +39,24 @@ void Boids::spawnFish(Fish& f) {
     float ang = randf() * 6.2831853f;
     f.vel = Vec3(std::cos(ang), (randf() - 0.5f) * 0.3f, std::sin(ang)) * kMinSpeed;
     f.colorHue = randf();
+
+    f.mode = randf() < 0.5f ? FishMode::Boid : FishMode::Random;
+    f.modeTimer = kMinModeSeconds + randf() * (kMaxModeSeconds - kMinModeSeconds);
+    float wanderAng = randf() * 6.2831853f;
+    f.wanderDir = Vec3(std::cos(wanderAng), (randf() - 0.5f) * 0.5f, std::sin(wanderAng)).normalized();
+}
+
+// Rolls a fresh Boid-or-Random mode + 1-10s timer — used both for the
+// periodic re-roll and for the moment a fish leaves Food mode once food
+// runs out. Never picks Food: that mode is only ever entered via the
+// global food-active check in update(), not this per-fish roll.
+void Boids::pickNewRoamingMode(Fish& f) {
+    f.mode = randf() < 0.5f ? FishMode::Boid : FishMode::Random;
+    f.modeTimer = kMinModeSeconds + randf() * (kMaxModeSeconds - kMinModeSeconds);
+    if (f.mode == FishMode::Random) {
+        float ang = randf() * 6.2831853f;
+        f.wanderDir = Vec3(std::cos(ang), (randf() - 0.5f) * 0.5f, std::sin(ang)).normalized();
+    }
 }
 
 void Boids::setFishCount(int count) {
@@ -92,7 +111,28 @@ void Boids::update(float dt) {
         if (food.life <= 0.0f) food.active = false;
     }
 
-    // --- fish: classic boids (separation/alignment/cohesion) + food seeking + bounds ---
+    // --- mode state machine: Food overrides everything else as a group,
+    // for as long as any food is active; otherwise each fish counts down
+    // its own Boid/Random timer and re-rolls when it hits zero. ---
+    bool anyFoodActive = false;
+    for (const auto& food : food_) {
+        if (food.active) { anyFoodActive = true; break; }
+    }
+    for (auto& f : fish_) {
+        if (anyFoodActive) {
+            f.mode = FishMode::Food; // timer is paused, not consumed, while in Food mode
+        } else if (f.mode == FishMode::Food) {
+            pickNewRoamingMode(f); // food just ran out — pick what's next
+        } else {
+            f.modeTimer -= dt;
+            if (f.modeTimer <= 0.0f) pickNewRoamingMode(f);
+        }
+    }
+
+    // --- fish: separation/alignment/cohesion (Boid), wander (Random), or
+    // food-seeking (Food) — separation applies in every mode, alignment/
+    // cohesion only in Boid, food-seeking only in Food, wander only in
+    // Random. Boundary avoidance always applies regardless of mode. ---
     const size_t n = fish_.size();
     std::vector<Vec3> newVel(n);
 
@@ -116,29 +156,48 @@ void Boids::update(float dt) {
 
         Vec3 accel;
         if (neighbors > 0) {
-            alignment = alignment * (1.0f / neighbors);
-            cohesion = (cohesion * (1.0f / neighbors)) - self.pos;
             accel += separation.normalized() * kMaxForce * 1.4f;
-            accel += (alignment.normalized() * kMaxSpeed - self.vel).normalized() * kMaxForce * 0.8f;
-            accel += cohesion.normalized() * kMaxForce * 0.6f;
+            if (self.mode == FishMode::Boid) {
+                alignment = alignment * (1.0f / neighbors);
+                cohesion = (cohesion * (1.0f / neighbors)) - self.pos;
+                accel += (alignment.normalized() * kMaxSpeed - self.vel).normalized() * kMaxForce * 0.8f;
+                accel += cohesion.normalized() * kMaxForce * 0.6f;
+            }
         }
 
-        // Seek the nearest active food within range.
-        float bestDist = kFoodAttractRadius;
-        const Food* bestFood = nullptr;
-        for (const auto& food : food_) {
-            if (!food.active) continue;
-            float d = (food.pos - self.pos).length();
-            if (d < bestDist) { bestDist = d; bestFood = &food; }
-        }
-        if (bestFood) {
-            Vec3 toFood = (bestFood->pos - self.pos);
-            float d = toFood.length();
-            if (d < kFoodEatRadius) {
-                const_cast<Food*>(bestFood)->active = false; // eaten
-            } else {
-                accel += toFood.normalized() * kMaxForce * 1.6f;
+        if (self.mode == FishMode::Food) {
+            // Seek the nearest active food — no range cap: being in Food
+            // mode at all already means food exists somewhere, so head
+            // for it regardless of distance.
+            float bestDist = 1e6f;
+            const Food* bestFood = nullptr;
+            for (const auto& food : food_) {
+                if (!food.active) continue;
+                float d = (food.pos - self.pos).length();
+                if (d < bestDist) { bestDist = d; bestFood = &food; }
             }
+            if (bestFood) {
+                Vec3 toFood = (bestFood->pos - self.pos);
+                float d = toFood.length();
+                if (d < kFoodEatRadius) {
+                    const_cast<Food*>(bestFood)->active = false; // eaten
+                } else {
+                    accel += toFood.normalized() * kMaxForce * 1.6f;
+                }
+            }
+        } else if (self.mode == FishMode::Random) {
+            // Slowly drift the wander heading for organic movement, then
+            // steer toward it — same steering formula Boid mode uses for
+            // alignment, just aimed at a personal random heading instead
+            // of the neighborhood's average velocity.
+            float driftAngle = (randf() - 0.5f) * 1.5f * dt;
+            float cosA = std::cos(driftAngle), sinA = std::sin(driftAngle);
+            float wx = self.wanderDir.x * cosA - self.wanderDir.z * sinA;
+            float wz = self.wanderDir.x * sinA + self.wanderDir.z * cosA;
+            float wy = self.wanderDir.y + (randf() - 0.5f) * 0.4f * dt;
+            wy = std::max(-0.6f, std::min(0.6f, wy));
+            self.wanderDir = Vec3(wx, wy, wz).normalized();
+            accel += (self.wanderDir * kMaxSpeed - self.vel).normalized() * kMaxForce * 0.9f;
         }
 
         // Soft boundary: steer back in once past the margin.

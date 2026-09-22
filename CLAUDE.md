@@ -44,8 +44,10 @@ src/
                      "Debugging" below) — no browser needed to check a
                      rendering change visually.
   gl_loader.cpp      Native-only: loads GL functions via glfwGetProcAddress
-  boids.cpp          Simulation: separation/alignment/cohesion + food-seeking
-                      + soft boundary. Plain O(n²) neighbor search.
+  boids.cpp          Simulation: each fish is in Boid (separation/alignment/
+                      cohesion), Random (separation + wander), or Food
+                      (separation + seek) mode — see FishMode in boids.h.
+                      Plus a soft boundary, always. Plain O(n²) neighbor search.
   environment_mesh.cpp  Floor (jittered grid), 4 walls, plant blade, water
                       surface grid — all built once at startup from the
                       tank's half-extents
@@ -117,6 +119,21 @@ cd web && python3 -m http.server 8934   # open http://localhost:8934/
   repo is that simulation *and* rendering both happen in C++/wasm.
 - **Fish are procedural**, built in `fish_mesh.cpp` from primitives — no
   external mesh/texture assets, no asset-loading pipeline to maintain.
+- **Separation applies in every `FishMode`; alignment/cohesion only in
+  Boid; seeking only in Food; wander only in Random.** This split is the
+  whole point of having modes at all — don't fold alignment/cohesion into
+  Random or Food "to make them look nicer," that's specifically the
+  behavior that's supposed to be absent there. Boundary avoidance is
+  separate from all three modes and always applies regardless of mode.
+- **`FishMode::Food` is a global, all-fish-at-once state, not a per-fish
+  reaction to nearby food.** `Boids::update()` checks once per frame
+  whether *any* food is active anywhere in the tank and, if so, forces
+  every fish into Food mode — overriding whatever Boid/Random timer it was
+  mid-way through (the timer is paused, not reset, so it doesn't lose
+  progress). Only once no food is active does a fish that was in Food mode
+  roll a fresh Boid-or-Random mode + 1-10s timer via
+  `pickNewRoamingMode()`. Don't make this per-fish-distance-based; that's a
+  different feature than what was asked for.
 - Masters/large binaries don't belong here at all (unlike the website repo,
   this one has no media pipeline) — if a task wants to add one, it's out of
   scope for this repo.

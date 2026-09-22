@@ -4,10 +4,24 @@
 
 namespace ft {
 
+// Boid: the usual separation/alignment/cohesion flocking.
+// Random: wanders in a slowly-drifting random heading, still keeping
+//         separation from neighbors — no alignment/cohesion.
+// Food: swims toward the nearest active food, still keeping separation —
+//       no alignment/cohesion. Entered/left as a group: as long as any
+//       food is active anywhere in the tank, every fish is in Food mode,
+//       overriding whatever Boid/Random timer it was mid-way through; once
+//       food runs out, each fish rolls a fresh Boid-or-Random mode + timer.
+enum class FishMode { Boid, Random, Food };
+
 struct Fish {
     Vec3 pos;
     Vec3 vel;
     float colorHue = 0.0f; // 0..1, assigned once at spawn for visual variety
+
+    FishMode mode = FishMode::Boid;
+    float modeTimer = 0.0f;  // seconds left in Boid/Random before re-rolling; not counted down in Food mode
+    Vec3 wanderDir{1, 0, 0}; // current heading target while in Random mode, drifts slowly each frame
 };
 
 struct Food {
@@ -46,6 +60,7 @@ public:
 
 private:
     void spawnFish(Fish& f);
+    void pickNewRoamingMode(Fish& f);
 
     std::vector<Fish> fish_;
     std::vector<Food> food_;

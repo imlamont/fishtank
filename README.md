@@ -90,10 +90,18 @@ cd web && python3 -m http.server 8934
 
 ## Simulation notes
 
-- `Boids::update()` is plain O(n²) neighbor search (separation/alignment/
-  cohesion) plus a food-seeking force and a soft boundary push-back. Fine at
-  the current ~100-150 fish scale; would need spatial partitioning well
-  beyond that.
+- Each fish is in one of three modes (`FishMode` in `boids.h`): **Boid**
+  (separation + alignment + cohesion), **Random** (separation + a slowly-
+  drifting wander heading, no alignment/cohesion), or **Food** (separation +
+  seek the nearest active food, no alignment/cohesion). A soft boundary
+  push-back always applies regardless of mode. Fish roll a fresh Boid-or-
+  Random mode with a random 1-10s timer whenever the timer runs out; as
+  soon as any food is active anywhere in the tank, every fish switches to
+  Food mode as a group (pausing, not resetting, whatever timer it was
+  mid-way through), and once all food is gone/eaten each fish rolls a fresh
+  Boid-or-Random mode again. `Boids::update()` is plain O(n²) neighbor
+  search; fine at the current ~100-150 fish scale, would need spatial
+  partitioning well beyond that.
 - Food pellets drop from the tank surface at the clicked/fed x/z, sink, and
   either get eaten (fish within `kFoodEatRadius`) or expire after
   `kFoodLifetime` seconds.
