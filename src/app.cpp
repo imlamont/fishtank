@@ -23,7 +23,11 @@ void App::feedAtScreen(float ndcX, float ndcY) {
 
 void App::orbit(float dx, float dy) {
     const float yawPerFullDrag = 3.6f;   // ~1.15 full turns dragging all the way across
-    const float pitchPerFullDrag = 2.4f; // radians, well within Renderer's own clamp
+    // Renderer's pitch range is ~1.3 radians end to end (see addOrbitDelta);
+    // this covers it in a bit more than one full-height drag, so dragging
+    // top-to-bottom takes you comfortably from near water-level to near
+    // top-down without feeling twitchy.
+    const float pitchPerFullDrag = 1.6f;
     renderer_.addOrbitDelta(dx * yawPerFullDrag, dy * pitchPerFullDrag);
 }
 

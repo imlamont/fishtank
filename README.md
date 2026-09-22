@@ -95,9 +95,10 @@ cd web && python3 -m http.server 8934
   current aspect ratio (`Renderer::render` in `src/renderer.cpp`) so the
   full tank stays framed regardless of the embed's width/height. Dragging
   orbits the camera around the tank's vertical axis (yaw, unbounded) and
-  adjusts its downward tilt (pitch, clamped — see `addOrbitDelta` in
-  `renderer.cpp`); there's no more automatic idle motion now that the
-  camera is interactive.
+  adjusts its downward tilt (pitch, clamped to roughly 11-86 degrees —
+  see `addOrbitDelta` in `renderer.cpp` — a real vertical look range from
+  near water-level to near top-down, not just a narrow safety margin);
+  there's no more automatic idle motion now that the camera is interactive.
 - Fish are procedural low-poly meshes (`fish_mesh.cpp`), not sourced assets,
   instanced via a single dynamic-per-frame instance buffer (position +
   orientation + per-fish hue color).

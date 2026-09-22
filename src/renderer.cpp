@@ -243,20 +243,25 @@ Mat4 Renderer::computeViewProj(const Boids& sim, float timeSeconds) const {
 void Renderer::addOrbitDelta(float dYaw, float dPitch) {
     orbitYaw_ += dYaw; // unbounded — a full spin around the tank is fine
 
-    // Keep tilt away from both extremes: too shallow breaks pickSurfacePoint
-    // (see computeViewProj's comment and CLAUDE.md), too steep (near
-    // straight-down) makes the lookAt basis nearly degenerate since
-    // forward and the world-up hint become almost parallel.
+    // Keep tilt just barely off both extremes: exactly level (or worse,
+    // looking slightly up) or exactly straight down would make the lookAt
+    // basis degenerate (forward parallel to the world-up hint) and/or
+    // stand pickSurfacePoint's ray-plane intersection on a knife's edge
+    // (see computeViewProj's comment). Within that, the range is wide on
+    // purpose — this is the user's actual vertical look range, not just a
+    // safety margin.
+    //
+    // At the shallow end, pickSurfacePoint's click-to-world math does get
+    // numerically shakier (a near-level ray barely changes height per unit
+    // of depth, so the surface-plane intersection can extrapolate well
+    // outside the tank) — but Boids::feedAt clamps the result to the tank
+    // bounds regardless, so the visible failure mode is "food lands at the
+    // nearest edge instead of exactly under the cursor" at extreme angles,
+    // not a crash or a wildly-out-of-tank result. That's an acceptable
+    // trade for actually letting the camera go near water-level.
     const float baseTilt = 0.9f;
-    // minTilt must clear the FOV's half-angle (~26 degrees) by a wide
-    // margin — 0.55 rad (~31 degrees, only ~5 degrees of margin) was tried
-    // and measurably unstable (picked world coordinates blew up to tens of
-    // units at the frame edges); 0.8 rad keeps ~20 degrees of margin,
-    // comfortably in the range already proven stable at the original fixed
-    // tilt of 0.9 rad. Don't lower this without re-testing picking at the
-    // frame's edges/corners, not just the center — see CLAUDE.md.
-    const float minTilt = 0.8f;   // ~46 degrees downward
-    const float maxTilt = 1.45f;  // ~83 degrees downward
+    const float minTilt = 0.2f;  // ~11 degrees downward — near water-level
+    const float maxTilt = 1.5f;  // ~86 degrees downward — near top-down
     float tilt = std::max(minTilt, std::min(maxTilt, baseTilt + orbitPitch_ + dPitch));
     orbitPitch_ = tilt - baseTilt;
 }

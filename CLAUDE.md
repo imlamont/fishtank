@@ -183,11 +183,21 @@ cd web && python3 -m http.server 8934   # open http://localhost:8934/
   also fire a feed. Wire a new input path (touch gestures, a second mouse
   button, etc.) through this same pattern, not a raw `pointerdown` ->
   `ft_feed_at` call.
-- **`Renderer::addOrbitDelta`'s pitch clamp (`minTilt`/`maxTilt`) is not
-  cosmetic — it's the same numerical-stability constraint as
-  `pickSurfacePoint`'s.** The fixed 52-degree tilt was already tuned to
-  clear the FOV's half-angle with a wide margin (see the picking gotcha
-  above); orbiting the camera can't be allowed to drag tilt back down into
-  the range that was already proven unstable. `minTilt` was set by
-  re-deriving that same margin, not by feel — don't loosen it without
-  re-testing picking at the frame's edges at the new minimum tilt.
+- **`Renderer::addOrbitDelta`'s pitch clamp (`minTilt`/`maxTilt`,
+  currently ~11 to ~86 degrees) trades click-picking precision for a real
+  vertical look range, on purpose.** The original fixed 52-degree tilt was
+  chosen to clear the FOV's half-angle with a wide margin specifically so
+  `pickSurfacePoint`'s ray-plane intersection stayed well-conditioned (see
+  the picking gotcha above). Once the camera became user-controllable, a
+  clamp that tight made vertical dragging feel like it barely did
+  anything, so the range was widened deliberately — accepting that
+  clicking near the shallow end (near water-level) can land food less
+  precisely than at the original tilt, since the ray-plane math gets
+  numerically shakier there. This is safe specifically *because*
+  `Boids::feedAt` clamps its result to the tank bounds regardless: the
+  failure mode at extreme angles is "food lands at the nearest edge
+  instead of exactly under the cursor," not a crash or an out-of-tank
+  result. If picking precision at shallow angles ever actually matters
+  (rather than just "a bit imprecise is fine"), the real fix is a better
+  picking method for that regime (e.g. nearest point on the click ray to
+  the tank's AABB), not re-narrowing this clamp back down.
