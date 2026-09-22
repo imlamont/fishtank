@@ -141,30 +141,66 @@ void Renderer::resize(int widthPx, int heightPx) {
     glViewport(0, 0, width_, height_);
 }
 
-void Renderer::render(const Boids& sim, float timeSeconds) {
-    glClearColor(0.043f, 0.086f, 0.114f, 1.0f); // deep aquarium blue, dark-theme friendly
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
+Mat4 Renderer::computeViewProj(const Boids& sim, float timeSeconds) const {
     const Vec3& half = sim.tankHalfExtents();
     float aspect = (float)width_ / (float)height_;
     const float fovY = 0.9f;
 
-    // Fixed front-on view with a very slight ambient sway, not a full orbit —
-    // this runs embedded in a page, not as a standalone demo, so a busy
-    // camera would compete with the rest of the site. Distance is derived
-    // from the tank size + current aspect ratio (not hardcoded) so the whole
-    // tank stays in frame whether the embed ends up wide or narrow.
+    // A downward-tilted view (not level) — mostly for looks, like peering
+    // into a tank from slightly above, but it also matters for correctness:
+    // pickSurfacePoint() intersects click rays with the water-surface plane,
+    // which is only numerically stable if the camera actually looks down at
+    // a meaningful angle. A near-level camera makes that intersection
+    // ill-conditioned (a ray barely changes height per unit of depth), which
+    // is exactly what caused clicks to resolve to wildly wrong positions.
+    //
+    // Distance is derived from the tank size + current aspect ratio (not
+    // hardcoded) so the whole tank stays in frame regardless of the embed's
+    // width/height; the tilt then trades a bit of that fit for a
+    // well-conditioned click plane, so the margin below is generous.
+    // Must clear halfFov (~26 degrees) by a comfortable margin, or the
+    // top-of-frame ray (tilt - halfFov) grazes near-horizontal and the
+    // surface-plane intersection goes unstable again — found by checking
+    // actual picked coordinates at the frame edges, not just the center.
+    const float tilt = 0.9f; // ~52 degrees downward
     float halfFov = fovY * 0.5f;
     float distForWidth = half.x / (std::tan(halfFov) * aspect);
     float distForHeight = half.y / std::tan(halfFov);
-    float eyeZ = half.z + std::max(distForWidth, distForHeight) * 1.15f;
+    float dist = half.z + std::max(distForWidth, distForHeight) * 1.3f;
 
     float sway = std::sin(timeSeconds * 0.15f) * 0.25f;
-    Vec3 eye(sway, half.y * 0.15f, eyeZ);
+    Vec3 eye(sway, dist * std::sin(tilt), dist * std::cos(tilt));
     Vec3 center(0, 0, 0);
     Mat4 view = Mat4::lookAt(eye, center, Vec3(0, 1, 0));
     Mat4 proj = Mat4::perspective(fovY, aspect, 0.1f, 200.0f);
-    Mat4 viewProj = proj * view;
+    return proj * view;
+}
+
+Vec3 Renderer::pickSurfacePoint(float ndcX, float ndcY, const Boids& sim, float timeSeconds) const {
+    Mat4 viewProj = computeViewProj(sim, timeSeconds);
+    Mat4 inv;
+    if (!invert(viewProj, inv)) return Vec3(0, 0, 0);
+
+    Vec4 nearClip{ndcX, ndcY, -1.0f, 1.0f};
+    Vec4 farClip{ndcX, ndcY, 1.0f, 1.0f};
+    Vec4 nearWorld4 = transform(inv, nearClip);
+    Vec4 farWorld4 = transform(inv, farClip);
+    Vec3 nearWorld(nearWorld4.x / nearWorld4.w, nearWorld4.y / nearWorld4.w, nearWorld4.z / nearWorld4.w);
+    Vec3 farWorld(farWorld4.x / farWorld4.w, farWorld4.y / farWorld4.w, farWorld4.z / farWorld4.w);
+
+    Vec3 ray = farWorld - nearWorld;
+    // Intersect with the same height food actually spawns at (see Boids::feedAt).
+    float planeY = sim.tankHalfExtents().y * 0.92f;
+    if (std::fabs(ray.y) < 1e-6f) return Vec3(nearWorld.x, planeY, nearWorld.z);
+    float t = (planeY - nearWorld.y) / ray.y;
+    return Vec3(nearWorld.x + ray.x * t, planeY, nearWorld.z + ray.z * t);
+}
+
+void Renderer::render(const Boids& sim, float timeSeconds) {
+    glClearColor(0.043f, 0.086f, 0.114f, 1.0f); // deep aquarium blue, dark-theme friendly
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    Mat4 viewProj = computeViewProj(sim, timeSeconds);
 
     shader_.use();
     glUniformMatrix4fv(shader_.uniformLocation("uViewProj"), 1, GL_FALSE, viewProj.m);

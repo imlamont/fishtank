@@ -25,10 +25,13 @@ public:
 
     void update(float dtSeconds);
 
-    // nx, nz in [-1, 1]: horizontal drop position across the tank's
-    // width/depth. Spawns a small pinch of food flakes at the surface that
-    // sink and get eaten (or expire).
-    void feedAt(float nx, float nz);
+    // worldX, worldZ: world-space horizontal drop position (clamped to the
+    // tank). Spawns a small pinch of food flakes at the surface, above
+    // (worldX, worldZ), that sink and get eaten (or expire). Callers
+    // resolving a screen click should project through the camera first
+    // (see Renderer::pickSurfacePoint) rather than passing screen
+    // coordinates here directly.
+    void feedAt(float worldX, float worldZ);
 
     void setFishCount(int count);
 

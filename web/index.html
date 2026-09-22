@@ -56,17 +56,19 @@
     window.addEventListener('resize', () => resizeCanvas(Module));
 
     feedBtn.addEventListener('click', () => {
-      // Drop a pinch of food at a random-ish spot near center.
-      const nx = (Math.random() * 2 - 1) * 0.6;
-      const nz = (Math.random() * 2 - 1) * 0.6;
-      Module.ccall('ft_feed_at', null, ['number', 'number'], [nx, nz]);
+      // Drop a pinch of food at a random-ish spot near the center of the view.
+      const ndcX = (Math.random() * 2 - 1) * 0.6;
+      const ndcY = (Math.random() * 2 - 1) * 0.6;
+      Module.ccall('ft_feed_at', null, ['number', 'number'], [ndcX, ndcY]);
     });
 
     canvas.addEventListener('pointerdown', (e) => {
       const rect = canvas.getBoundingClientRect();
-      const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      const nz = ((e.clientY - rect.top) / rect.height) * 2 - 1;
-      Module.ccall('ft_feed_at', null, ['number', 'number'], [nx, nz]);
+      // ft_feed_at expects NDC: x/y in [-1,1], y-up. CSS clientY grows
+      // downward, so Y has to flip here or clicks land mirrored vertically.
+      const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const ndcY = 1 - ((e.clientY - rect.top) / rect.height) * 2;
+      Module.ccall('ft_feed_at', null, ['number', 'number'], [ndcX, ndcY]);
     });
 
     let lastMs = performance.now();

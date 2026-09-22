@@ -16,7 +16,7 @@ canvas; the embedding page drives it:
 int  ft_init(const char* canvasSelector, int widthPx, int heightPx); // 1 = ok
 void ft_frame(float dtSeconds);           // call once per requestAnimationFrame
 void ft_resize(int widthPx, int heightPx);
-void ft_feed_at(float nx, float nz);      // nx, nz in [-1, 1]: drop position across the tank
+void ft_feed_at(float ndcX, float ndcY);  // click/tap position in NDC (x/y in [-1,1], y-up)
 void ft_set_fish_count(int count);
 ```
 

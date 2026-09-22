@@ -1,6 +1,7 @@
 build-native/
 build-web/
 compile_commands.json
+.cache/
 
 # Compiled wasm artifacts copied into web/ for local browser testing —
 # rebuild with the emscripten target, don't commit the output.

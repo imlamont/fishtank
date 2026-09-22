@@ -19,10 +19,11 @@ void onMouseButton(GLFWwindow* window, int button, int action, int) {
     if (button != GLFW_MOUSE_BUTTON_LEFT || action != GLFW_PRESS) return;
     double mx, my;
     glfwGetCursorPos(window, &mx, &my);
-    float nx = (float)(mx / g_width) * 2.0f - 1.0f;
-    float nz = (float)(my / g_height) * 2.0f - 1.0f; // click depth maps window Y -> tank Z
-    g_app.feedAt(nx, nz);
-    std::printf("[fishtank] fed at nx=%.2f nz=%.2f\n", nx, nz);
+    // GLFW cursor coords are pixels from the top-left; NDC is [-1,1] with
+    // +Y up, so the Y axis has to flip here or clicks land mirrored vertically.
+    float ndcX = (float)(mx / g_width) * 2.0f - 1.0f;
+    float ndcY = 1.0f - (float)(my / g_height) * 2.0f;
+    g_app.feedAtScreen(ndcX, ndcY);
 }
 
 void onKey(GLFWwindow* window, int key, int, int action, int) {

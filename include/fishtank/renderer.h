@@ -14,6 +14,16 @@ public:
     bool init();
     void resize(int widthPx, int heightPx);
     void render(const Boids& sim, float timeSeconds);
+
+    // Casts a ray from the camera through the given screen point (NDC,
+    // x/y in [-1, 1], y-up) and intersects it with the tank's water-surface
+    // plane — i.e. converts a click/tap into the same world (x, z) that
+    // ends up on screen where the user actually clicked, given the current
+    // (possibly swaying) camera. Uses the exact same camera as render() for
+    // the given sim/timeSeconds, so call it with the same timeSeconds you're
+    // about to render with.
+    Vec3 pickSurfacePoint(float ndcX, float ndcY, const Boids& sim, float timeSeconds) const;
+
     ~Renderer();
 
 private:
@@ -21,6 +31,8 @@ private:
         GLuint vao = 0, vbo = 0, instanceVbo = 0;
         GLsizei vertexCount = 0;
     };
+
+    Mat4 computeViewProj(const Boids& sim, float timeSeconds) const;
 
     Mesh createMesh(const std::vector<MeshVertex>& verts, int maxInstances);
     void uploadInstances(Mesh& mesh, const void* data, size_t byteSize);

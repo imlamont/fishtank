@@ -46,9 +46,14 @@ void ft_frame(float dtSeconds) { g_app.frame(dtSeconds); }
 EMSCRIPTEN_KEEPALIVE
 void ft_resize(int widthPx, int heightPx) { g_app.resize(widthPx, heightPx); }
 
-// nx, nz in [-1, 1]: horizontal drop position across the tank's width/depth.
+// ndcX, ndcY: click/tap position in normalized device coords, x/y in
+// [-1, 1], y-up — i.e. (-1,-1) is the bottom-left corner of the canvas,
+// (1,1) is top-right. NOT pixel coordinates, and NOT top-left-origin CSS
+// screen space; the caller must flip Y and normalize (see web/index.html).
+// Gets projected through the camera onto the tank's water surface, so food
+// lands where it visually looks like the user clicked.
 EMSCRIPTEN_KEEPALIVE
-void ft_feed_at(float nx, float nz) { g_app.feedAt(nx, nz); }
+void ft_feed_at(float ndcX, float ndcY) { g_app.feedAtScreen(ndcX, ndcY); }
 
 EMSCRIPTEN_KEEPALIVE
 void ft_set_fish_count(int count) { g_app.setFishCount(count); }

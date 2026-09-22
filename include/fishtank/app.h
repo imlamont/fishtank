@@ -11,7 +11,14 @@ public:
     bool init(int widthPx, int heightPx);
     void resize(int widthPx, int heightPx);
     void frame(float dtSeconds);
-    void feedAt(float nx, float nz);
+
+    // ndcX, ndcY: click/tap position in normalized device coords, x/y in
+    // [-1, 1], y-up (i.e. (-1,-1) is bottom-left, (1,1) is top-right — NOT
+    // raw pixel coordinates, and NOT top-left-origin screen space). Projects
+    // through the camera used for the most recent frame() call so the food
+    // lands where it visually looks like the user clicked.
+    void feedAtScreen(float ndcX, float ndcY);
+
     void setFishCount(int count);
 
 private:

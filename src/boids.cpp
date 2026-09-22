@@ -52,15 +52,16 @@ void Boids::setFishCount(int count) {
     for (size_t i = oldSize; i < fish_.size(); ++i) spawnFish(fish_[i]);
 }
 
-void Boids::feedAt(float nx, float nz) {
-    nx = std::max(-1.0f, std::min(1.0f, nx));
-    nz = std::max(-1.0f, std::min(1.0f, nz));
+void Boids::feedAt(float worldX, float worldZ) {
+    float margin = 0.9f; // keep the pinch's random jitter from spawning outside the walls
+    worldX = std::max(-halfExtents_.x * margin, std::min(halfExtents_.x * margin, worldX));
+    worldZ = std::max(-halfExtents_.z * margin, std::min(halfExtents_.z * margin, worldZ));
     int pellets = 4 + (int)(randf() * 3); // a small pinch, not one lonely flake
     for (int i = 0; i < pellets; ++i) {
         Food food;
-        food.pos = Vec3(nx * halfExtents_.x * 0.85f + (randf() - 0.5f) * 0.5f,
+        food.pos = Vec3(worldX + (randf() - 0.5f) * 0.5f,
                          halfExtents_.y * 0.92f,
-                         nz * halfExtents_.z * 0.85f + (randf() - 0.5f) * 0.5f);
+                         worldZ + (randf() - 0.5f) * 0.5f);
         food.vel = Vec3((randf() - 0.5f) * 0.1f, -0.15f - randf() * 0.1f, (randf() - 0.5f) * 0.1f);
         food.life = kFoodLifetime;
         food.active = true;

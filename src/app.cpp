@@ -16,7 +16,10 @@ void App::frame(float dtSeconds) {
     renderer_.render(sim_, elapsed_);
 }
 
-void App::feedAt(float nx, float nz) { sim_.feedAt(nx, nz); }
+void App::feedAtScreen(float ndcX, float ndcY) {
+    Vec3 surface = renderer_.pickSurfacePoint(ndcX, ndcY, sim_, elapsed_);
+    sim_.feedAt(surface.x, surface.z);
+}
 
 void App::setFishCount(int count) { sim_.setFishCount(count); }
 
