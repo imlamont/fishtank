@@ -166,6 +166,22 @@ cd web && python3 -m http.server 8934   # open http://localhost:8934/
 
 ## Known gotchas (found by actually testing, not by reasoning about the code)
 
+- **`Mat4::basisFromForward` originally mapped the fish mesh's local +X
+  (nose) axis to the "right" vector instead of "forward"** — the matrix
+  was a valid orthonormal rotation (determinant +1, no mirroring, so
+  backface culling still worked fine), it just pointed the nose 90° off
+  from the actual travel direction, so every fish visibly moved sideways
+  relative to which way it was facing. This is exactly the kind of bug
+  that's invisible from the code alone (the matrix "looks" like a
+  legitimate basis construction) and only shows up as "something's wrong
+  with the orientation" once you're watching it move — confirmed by
+  comparing a fish's position across two close-in-time frames against
+  its body's nose-tail axis, not by re-deriving the matrix on paper a
+  second time. Correct version: forward maps to column 0 (local +X),
+  `up = cross(right, forward)` to column 1, `right = cross(forward,
+  worldUp)` to column 2 — check `f × up = right` (matching local
+  +X × +Y = +Z) before trusting a change here, or the mesh silently
+  becomes mirrored instead of just misrotated.
 - **GLEW's `glewInit()` can fail with "Unknown error" (GLX error 4,
   `GLEW_ERROR_NO_GLX_DISPLAY`) under software/headless GL** (e.g. Xvfb +
   llvmpipe), even though the GL context itself is valid and

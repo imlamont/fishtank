@@ -61,7 +61,8 @@ struct Mat4 {
     }
 
     // Builds a basis matrix from a forward direction and a world-up hint,
-    // used to orient a fish mesh (authored facing +X) along its velocity.
+    // used to orient a fish mesh (authored facing +X, nose along local +X)
+    // along its velocity.
     static Mat4 basisFromForward(const Vec3& forward, const Vec3& worldUp) {
         Vec3 f = forward.normalized();
         if (f.lengthSq() < 1e-8f) f = Vec3(1, 0, 0);
@@ -69,11 +70,13 @@ struct Mat4 {
         if (right.lengthSq() < 1e-8f) right = Vec3(0, 0, 1);
         Vec3 up = cross(right, f).normalized();
         Mat4 r;
-        // Columns: right(+X authoring axis), up(+Y), -forward(+Z, right-handed), translation.
-        r.m[0] = right.x; r.m[1] = right.y; r.m[2] = right.z; r.m[3] = 0;
-        r.m[4] = up.x;    r.m[5] = up.y;    r.m[6] = up.z;    r.m[7] = 0;
-        r.m[8] = -f.x;    r.m[9] = -f.y;    r.m[10] = -f.z;   r.m[11] = 0;
-        r.m[12] = 0;      r.m[13] = 0;      r.m[14] = 0;      r.m[15] = 1;
+        // Columns: forward (+X authoring axis / nose), up (+Y), right (+Z),
+        // translation. f x up = right, matching the local right-handed
+        // axes (+X x +Y = +Z), so the mesh isn't mirrored by this map.
+        r.m[0] = f.x;     r.m[1] = f.y;     r.m[2] = f.z;      r.m[3] = 0;
+        r.m[4] = up.x;    r.m[5] = up.y;    r.m[6] = up.z;     r.m[7] = 0;
+        r.m[8] = right.x; r.m[9] = right.y; r.m[10] = right.z; r.m[11] = 0;
+        r.m[12] = 0;      r.m[13] = 0;      r.m[14] = 0;       r.m[15] = 1;
         return r;
     }
 
