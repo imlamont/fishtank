@@ -1,5 +1,6 @@
 #include "fishtank/renderer.h"
 #include "fishtank/fish_mesh.h"
+#include "fishtank/environment_mesh.h"
 #include <cmath>
 #include <cstddef>
 
@@ -35,18 +36,57 @@ in vec3 vNormal;
 in vec3 vColor;
 out vec4 fragColor;
 
+uniform float uAlpha;
+
 void main() {
     vec3 n = normalize(vNormal);
     vec3 lightDir = normalize(vec3(0.4, 0.9, 0.3));
     float diff = max(dot(n, lightDir), 0.0);
     vec3 color = vColor * 0.35 + vColor * diff * 0.85;
-    fragColor = vec4(color, 1.0);
+    fragColor = vec4(color, uAlpha);
+}
+)GLSL";
+
+// Same lighting/instancing as kVertSrc, plus a per-instance sway: the blade
+// mesh is authored with local y in [0, 1] (base to tip), and that RAW local
+// y — before the instance's model matrix is applied — is used as the bend
+// weight, so short and tall plants (different model-matrix scale) still
+// bend the same way relative to their own height.
+const char* kPlantVertSrc = R"GLSL(
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec4 aModelCol0;
+layout(location = 3) in vec4 aModelCol1;
+layout(location = 4) in vec4 aModelCol2;
+layout(location = 5) in vec4 aModelCol3;
+layout(location = 6) in vec3 aColor;
+layout(location = 7) in float aSwayPhase;
+layout(location = 8) in float aSwayAmplitude;
+layout(location = 9) in float aSwaySpeed;
+
+uniform mat4 uViewProj;
+uniform float uTime;
+
+out vec3 vNormal;
+out vec3 vColor;
+
+void main() {
+    mat4 model = mat4(aModelCol0, aModelCol1, aModelCol2, aModelCol3);
+    float bendWeight = aPos.y * aPos.y; // eases from fixed base to freely-swaying tip
+    float sway = sin(uTime * aSwaySpeed + aSwayPhase) * aSwayAmplitude * bendWeight;
+    vec3 bentPos = aPos + vec3(sway, 0.0, 0.0);
+    vec4 worldPos = model * vec4(bentPos, 1.0);
+    gl_Position = uViewProj * worldPos;
+    vNormal = mat3(model) * aNormal;
+    vColor = aColor;
 }
 )GLSL";
 
 constexpr int kMaxFishInstances = 400;
 constexpr int kMaxFoodInstances = 128;
+constexpr int kMaxPlantInstances = 96;
 constexpr int kFloatsPerInstance = 16 + 3; // mat4 + vec3 color
+constexpr int kFloatsPerPlantInstance = kFloatsPerInstance + 3; // + phase, amplitude, speed
 
 Vec3 hsvToRgb(float h, float s, float v) {
     float r, g, b;
@@ -73,9 +113,17 @@ void writeInstance(std::vector<float>& buf, const Mat4& model, const Vec3& color
     buf.push_back(color.z);
 }
 
+void writeInstance(std::vector<float>& buf, const Mat4& model, const Vec3& color,
+                    float a, float b, float c) {
+    writeInstance(buf, model, color);
+    buf.push_back(a);
+    buf.push_back(b);
+    buf.push_back(c);
+}
+
 } // namespace
 
-Renderer::Mesh Renderer::createMesh(const std::vector<MeshVertex>& verts, int maxInstances) {
+Renderer::Mesh Renderer::createMesh(const std::vector<MeshVertex>& verts, int maxInstances, int extraFloatAttribs) {
     Mesh mesh;
     mesh.vertexCount = (GLsizei)verts.size();
 
@@ -90,11 +138,12 @@ Renderer::Mesh Renderer::createMesh(const std::vector<MeshVertex>& verts, int ma
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(MeshVertex), (void*)offsetof(MeshVertex, nx));
 
+    const int floatsPerInstance = kFloatsPerInstance + extraFloatAttribs;
     glGenBuffers(1, &mesh.instanceVbo);
     glBindBuffer(GL_ARRAY_BUFFER, mesh.instanceVbo);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(maxInstances * kFloatsPerInstance * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(maxInstances * floatsPerInstance * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
 
-    const GLsizei stride = kFloatsPerInstance * sizeof(float);
+    const GLsizei stride = floatsPerInstance * sizeof(float);
     for (int col = 0; col < 4; ++col) {
         GLuint loc = 2 + col;
         glEnableVertexAttribArray(loc);
@@ -104,6 +153,13 @@ Renderer::Mesh Renderer::createMesh(const std::vector<MeshVertex>& verts, int ma
     glEnableVertexAttribArray(6);
     glVertexAttribPointer(6, 3, GL_FLOAT, GL_FALSE, stride, (void*)(size_t)(16 * sizeof(float)));
     glVertexAttribDivisor(6, 1);
+
+    for (int i = 0; i < extraFloatAttribs; ++i) {
+        GLuint loc = 7 + i;
+        glEnableVertexAttribArray(loc);
+        glVertexAttribPointer(loc, 1, GL_FLOAT, GL_FALSE, stride, (void*)(size_t)((19 + i) * sizeof(float)));
+        glVertexAttribDivisor(loc, 1);
+    }
 
     glBindVertexArray(0);
     return mesh;
@@ -121,11 +177,18 @@ void Renderer::drawInstanced(const Mesh& mesh, int instanceCount) {
     glBindVertexArray(0);
 }
 
-bool Renderer::init() {
+bool Renderer::init(const Boids& sim) {
     if (!shader_.compile(kVertSrc, kFragSrc)) return false;
+    if (!plantShader_.compile(kPlantVertSrc, kFragSrc)) return false;
 
     fishMesh_ = createMesh(buildFishMesh(), kMaxFishInstances);
     foodMesh_ = createMesh(buildOctahedronMesh(0.06f), kMaxFoodInstances);
+
+    const Vec3& half = sim.tankHalfExtents();
+    floorMesh_ = createMesh(buildFloorMesh(half, 10, 1234u), 1);
+    wallsMesh_ = createMesh(buildWallsMesh(half), 1);
+    plantMesh_ = createMesh(buildPlantBladeMesh(), kMaxPlantInstances, 3);
+    plants_ = std::make_unique<Plants>(kMaxPlantInstances / 2, half, 4321u);
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
@@ -202,8 +265,15 @@ void Renderer::render(const Boids& sim, float timeSeconds) {
 
     Mat4 viewProj = computeViewProj(sim, timeSeconds);
 
+    // --- Opaque pass: floor, plants, fish, food (any order among these is fine). ---
     shader_.use();
     glUniformMatrix4fv(shader_.uniformLocation("uViewProj"), 1, GL_FALSE, viewProj.m);
+    glUniform1f(shader_.uniformLocation("uAlpha"), 1.0f);
+
+    instanceScratch_.clear();
+    writeInstance(instanceScratch_, Mat4::identity(), Vec3(0.76f, 0.68f, 0.47f)); // sand
+    uploadInstances(floorMesh_, instanceScratch_.data(), instanceScratch_.size() * sizeof(float));
+    drawInstanced(floorMesh_, 1);
 
     instanceScratch_.clear();
     int fishCount = 0;
@@ -234,6 +304,51 @@ void Renderer::render(const Boids& sim, float timeSeconds) {
         uploadInstances(foodMesh_, instanceScratch_.data(), instanceScratch_.size() * sizeof(float));
         drawInstanced(foodMesh_, foodCount);
     }
+
+    // Plants aren't a closed volume (flat single-sided blades), so backface
+    // culling would make them vanish from some angles — not worth doubling
+    // the geometry for a handful of decorative blades, so just disable
+    // culling for this one draw.
+    glDisable(GL_CULL_FACE);
+    plantShader_.use();
+    glUniformMatrix4fv(plantShader_.uniformLocation("uViewProj"), 1, GL_FALSE, viewProj.m);
+    glUniform1f(plantShader_.uniformLocation("uAlpha"), 1.0f);
+    glUniform1f(plantShader_.uniformLocation("uTime"), timeSeconds);
+
+    instanceScratch_.clear();
+    int plantCount = 0;
+    if (plants_) {
+        for (const auto& p : plants_->instances()) {
+            if (plantCount >= kMaxPlantInstances) break;
+            Mat4 model = Mat4::translation(p.basePos) * Mat4::scale(p.height);
+            Vec3 color = hsvToRgb(p.colorHue, 0.6f, 0.55f);
+            writeInstance(instanceScratch_, model, color, p.swayPhase, p.swayAmplitude, p.swaySpeed);
+            ++plantCount;
+        }
+    }
+    if (plantCount > 0) {
+        uploadInstances(plantMesh_, instanceScratch_.data(), instanceScratch_.size() * sizeof(float));
+        drawInstanced(plantMesh_, plantCount);
+    }
+    glEnable(GL_CULL_FACE);
+
+    // --- Transparent pass: glass walls, drawn last, blended over everything
+    // above without occluding it (depth test stays on so walls still hide
+    // correctly behind each other and the floor, but depth WRITE is off so
+    // a wall never blocks something behind it that hasn't drawn yet). ---
+    shader_.use();
+    glUniform1f(shader_.uniformLocation("uAlpha"), 0.22f);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+
+    instanceScratch_.clear();
+    writeInstance(instanceScratch_, Mat4::identity(), Vec3(0.55f, 0.75f, 0.85f)); // pale glass-blue
+    uploadInstances(wallsMesh_, instanceScratch_.data(), instanceScratch_.size() * sizeof(float));
+    drawInstanced(wallsMesh_, 1);
+
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
 }
 
 Renderer::~Renderer() {
@@ -244,6 +359,9 @@ Renderer::~Renderer() {
     };
     destroy(fishMesh_);
     destroy(foodMesh_);
+    destroy(floorMesh_);
+    destroy(wallsMesh_);
+    destroy(plantMesh_);
 }
 
 } // namespace ft

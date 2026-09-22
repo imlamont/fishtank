@@ -27,7 +27,9 @@ the website needs to reimplement (canvas setup, resize, RAF loop, click ->
 ## Layout
 
 ```
-include/fishtank/   Headers: math3d, boids (sim), fish_mesh, shader, renderer, app, gl_compat/gl_loader
+include/fishtank/   Headers: math3d, boids (sim), fish_mesh, environment_mesh
+                     (floor/walls/plant blade), plants (scatter data), shader,
+                     renderer, app, gl_compat/gl_loader
 src/                 Implementation + the two entry points:
                        main_web.cpp     Emscripten build, exports the C API above
                        main_native.cpp  GLFW desktop window, for fast local iteration
@@ -91,3 +93,11 @@ cd web && python3 -m http.server 8934
 - Fish are procedural low-poly meshes (`fish_mesh.cpp`), not sourced assets,
   instanced via a single dynamic-per-frame instance buffer (position +
   orientation + per-fish hue color).
+- The sandy floor (jittered grid), 4 glass walls, and plant blades are all
+  procedural too (`environment_mesh.cpp`), built once from the tank's
+  half-extents — nothing per-frame to regenerate. Plants are scattered in
+  loose random clusters at startup (`plants.cpp`, `Plants` class) and sway
+  entirely in the vertex shader (`kPlantVertSrc` in `renderer.cpp`) driven
+  by each instance's own phase/amplitude/speed — no per-frame CPU work
+  scales with plant count. Walls render last, alpha-blended, with depth
+  writes off so they don't occlude the fish/floor/plants behind them.

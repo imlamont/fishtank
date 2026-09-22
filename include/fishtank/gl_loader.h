@@ -37,6 +37,7 @@ typedef void (*PFN_glDeleteProgram)(GLuint);
 typedef void (*PFN_glUseProgram)(GLuint);
 typedef GLint (*PFN_glGetUniformLocation)(GLuint, const GLchar*);
 typedef void (*PFN_glUniformMatrix4fv)(GLint, GLsizei, GLboolean, const GLfloat*);
+typedef void (*PFN_glUniform1f)(GLint, GLfloat);
 
 typedef void (*PFN_glGenVertexArrays)(GLsizei, GLuint*);
 typedef void (*PFN_glBindVertexArray)(GLuint);
@@ -67,6 +68,7 @@ struct Functions {
     PFN_glUseProgram UseProgram;
     PFN_glGetUniformLocation GetUniformLocation;
     PFN_glUniformMatrix4fv UniformMatrix4fv;
+    PFN_glUniform1f Uniform1f;
     PFN_glGenVertexArrays GenVertexArrays;
     PFN_glBindVertexArray BindVertexArray;
     PFN_glDeleteVertexArrays DeleteVertexArrays;
@@ -104,6 +106,7 @@ inline void glDeleteProgram(GLuint p) { ft::gl::g.DeleteProgram(p); }
 inline void glUseProgram(GLuint p) { ft::gl::g.UseProgram(p); }
 inline GLint glGetUniformLocation(GLuint p, const GLchar* name) { return ft::gl::g.GetUniformLocation(p, name); }
 inline void glUniformMatrix4fv(GLint loc, GLsizei count, GLboolean transpose, const GLfloat* v) { ft::gl::g.UniformMatrix4fv(loc, count, transpose, v); }
+inline void glUniform1f(GLint loc, GLfloat v) { ft::gl::g.Uniform1f(loc, v); }
 inline void glGenVertexArrays(GLsizei n, GLuint* arrays) { ft::gl::g.GenVertexArrays(n, arrays); }
 inline void glBindVertexArray(GLuint a) { ft::gl::g.BindVertexArray(a); }
 inline void glDeleteVertexArrays(GLsizei n, const GLuint* arrays) { ft::gl::g.DeleteVertexArrays(n, arrays); }

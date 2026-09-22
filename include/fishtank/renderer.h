@@ -1,9 +1,11 @@
 #pragma once
+#include <memory>
 #include "gl_compat.h"
 #include "shader.h"
 #include "boids.h"
 #include "math3d.h"
 #include "fish_mesh.h"
+#include "plants.h"
 
 namespace ft {
 
@@ -11,7 +13,10 @@ namespace ft {
 // simulation state. Nothing here touches simulation logic.
 class Renderer {
 public:
-    bool init();
+    // Needs sim at init time (not just render time) so the floor, walls,
+    // and plant scatter can be sized/seeded to the tank's actual
+    // half-extents once, up front, instead of being rebuilt every frame.
+    bool init(const Boids& sim);
     void resize(int widthPx, int heightPx);
     void render(const Boids& sim, float timeSeconds);
 
@@ -34,13 +39,21 @@ private:
 
     Mat4 computeViewProj(const Boids& sim, float timeSeconds) const;
 
-    Mesh createMesh(const std::vector<MeshVertex>& verts, int maxInstances);
+    // extraFloatAttribs: additional scalar (float) per-instance attributes
+    // beyond the standard mat4 + vec3 color, bound at consecutive locations
+    // starting at 7. Used by the plant mesh (phase, amplitude, speed).
+    Mesh createMesh(const std::vector<MeshVertex>& verts, int maxInstances, int extraFloatAttribs = 0);
     void uploadInstances(Mesh& mesh, const void* data, size_t byteSize);
     void drawInstanced(const Mesh& mesh, int instanceCount);
 
     Shader shader_;
+    Shader plantShader_;
     Mesh fishMesh_;
     Mesh foodMesh_;
+    Mesh floorMesh_;
+    Mesh wallsMesh_;
+    Mesh plantMesh_;
+    std::unique_ptr<Plants> plants_;
     int width_ = 1, height_ = 1;
 
     std::vector<float> instanceScratch_; // reused each frame to avoid per-frame heap churn

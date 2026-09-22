@@ -32,6 +32,7 @@ bool loadFunctions() {
     ok &= load(g.UseProgram, "glUseProgram");
     ok &= load(g.GetUniformLocation, "glGetUniformLocation");
     ok &= load(g.UniformMatrix4fv, "glUniformMatrix4fv");
+    ok &= load(g.Uniform1f, "glUniform1f");
     ok &= load(g.GenVertexArrays, "glGenVertexArrays");
     ok &= load(g.BindVertexArray, "glBindVertexArray");
     ok &= load(g.DeleteVertexArrays, "glDeleteVertexArrays");

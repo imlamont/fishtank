@@ -3,7 +3,7 @@
 namespace ft {
 
 bool App::init(int widthPx, int heightPx) {
-    if (!renderer_.init()) return false;
+    if (!renderer_.init(sim_)) return false;
     resize(widthPx, heightPx);
     return true;
 }

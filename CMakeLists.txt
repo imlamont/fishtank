@@ -12,6 +12,8 @@ endif()
 set(FISHTANK_CORE_SOURCES
     src/boids.cpp
     src/fish_mesh.cpp
+    src/environment_mesh.cpp
+    src/plants.cpp
     src/renderer.cpp
     src/shader.cpp
     src/app.cpp

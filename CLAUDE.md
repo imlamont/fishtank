@@ -31,16 +31,25 @@ reconsider — that was a deliberate choice, not an oversight.
 ## Layout
 
 ```
-include/fishtank/   Headers — math3d (vec3/mat4, no external dep), boids (sim),
-                     fish_mesh (procedural low-poly meshes), shader, renderer,
-                     app (platform-independent glue), gl_compat/gl_loader
+include/fishtank/   Headers — math3d (vec3/mat4, no external dep), boids (fish/
+                     food sim), fish_mesh (fish + food meshes), environment_mesh
+                     (floor/walls/plant-blade meshes), plants (plant scatter
+                     data, no sim needed — sway is shader-side), shader,
+                     renderer, app (platform-independent glue), gl_compat/gl_loader
 src/
   main_web.cpp       Emscripten entry point, exports the C API above
   main_native.cpp    GLFW desktop window — click to feed, Esc to quit
   gl_loader.cpp      Native-only: loads GL functions via glfwGetProcAddress
   boids.cpp          Simulation: separation/alignment/cohesion + food-seeking
                       + soft boundary. Plain O(n²) neighbor search.
-  renderer.cpp        Shaders, instanced draw calls, adaptive camera framing
+  environment_mesh.cpp  Floor (jittered grid), 4 walls, plant blade — all
+                      built once at startup from the tank's half-extents
+  plants.cpp         Random cluster scatter of plant instances (position,
+                      height, hue, sway phase/amplitude/speed) — static data,
+                      no update() needed
+  renderer.cpp        Two shaders (main + plant-with-sway), instanced draw
+                      calls, adaptive camera framing, opaque pass then
+                      alpha-blended glass walls last
 web/index.html       Reference JS harness — the whole contract a page needs
                      to drive this module (canvas setup, resize, RAF loop,
                      click -> ft_feed_at). Website's fish.html re-implements
@@ -86,6 +95,18 @@ cd web && python3 -m http.server 8934   # open http://localhost:8934/
 - Masters/large binaries don't belong here at all (unlike the website repo,
   this one has no media pipeline) — if a task wants to add one, it's out of
   scope for this repo.
+- **Plant sway happens in the vertex shader, not on the CPU.** The blade
+  mesh (`buildPlantBladeMesh`) is authored once, in local space, base at
+  y=0 / tip at y=1; `kPlantVertSrc` bends each vertex sideways by an amount
+  that grows with that *raw, pre-model-matrix* local y. Don't reintroduce a
+  CPU-side per-frame vertex recompute for plants — the whole point of doing
+  it this way is that N swaying plants cost the same one instanced draw
+  call as N static ones.
+- **Floor/wall/plant geometry is generated once in `Renderer::init()`**,
+  not rebuilt per frame — they're static (floor/walls) or shader-animated
+  (plants), so there's nothing per-frame to regenerate. If a future change
+  needs the tank shape to be dynamic, that assumption has to be revisited
+  everywhere `init()` currently bakes in `sim.tankHalfExtents()`.
 
 ## Known gotchas (found by actually testing, not by reasoning about the code)
 
@@ -139,3 +160,16 @@ cd web && python3 -m http.server 8934   # open http://localhost:8934/
   must be flipped when building `ndcY` (`main_native.cpp`'s
   `onMouseButton`, `web/index.html`'s `pointerdown` handler) or clicks land
   vertically mirrored.
+- **Wall/floor triangle winding is hand-derived per face, not automatic.**
+  With backface culling on, each axis-aligned quad in `environment_mesh.cpp`
+  needs a *specific* winding order so its outward normal (away from the
+  tank's center) is what actually gets kept — the "default" winding
+  (`pushTri(a, b, c)`, `pushTri(a, c, d)`) gives the right normal for the
+  left and front walls, but the **opposite** (flipped: `pushTri(a, c, b)`,
+  `pushTri(a, d, c)`) is needed for the right wall, back wall, and every
+  floor grid cell. This isn't a matter of taste — get it backwards and that
+  face is invisible (its front face points into the tank, gets backface
+  culled from every camera position outside it). If you add a new static
+  world-space panel, work out its winding the same way: cross(b-a, c-a)
+  must point in the direction you want visible from outside, not just "some
+  consistent direction."
