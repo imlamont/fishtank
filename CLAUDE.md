@@ -19,6 +19,7 @@ int  ft_init(const char* canvasSelector, int widthPx, int heightPx); // 1 = ok
 void ft_frame(float dtSeconds);           // call once per requestAnimationFrame
 void ft_resize(int widthPx, int heightPx);
 void ft_feed_at(float ndcX, float ndcY);  // click/tap position in NDC (x/y in [-1,1], y-up)
+void ft_orbit(float dx, float dy);        // drag delta as a fraction of canvas size
 void ft_set_fish_count(int count);
 ```
 
@@ -173,3 +174,20 @@ cd web && python3 -m http.server 8934   # open http://localhost:8934/
   world-space panel, work out its winding the same way: cross(b-a, c-a)
   must point in the direction you want visible from outside, not just "some
   consistent direction."
+- **Drag-to-orbit reuses the same click-vs-drag disambiguation in both
+  `main_native.cpp` and `web/index.html`**: accumulate total pointer
+  movement between press and release, and only treat it as a feed click if
+  that total stays under a small pixel threshold (currently 4px) —
+  otherwise every feed click's inevitable 1-2px of jitter would either
+  spuriously nudge the camera or, worse, a real drag's release point would
+  also fire a feed. Wire a new input path (touch gestures, a second mouse
+  button, etc.) through this same pattern, not a raw `pointerdown` ->
+  `ft_feed_at` call.
+- **`Renderer::addOrbitDelta`'s pitch clamp (`minTilt`/`maxTilt`) is not
+  cosmetic — it's the same numerical-stability constraint as
+  `pickSurfacePoint`'s.** The fixed 52-degree tilt was already tuned to
+  clear the FOV's half-angle with a wide margin (see the picking gotcha
+  above); orbiting the camera can't be allowed to drag tilt back down into
+  the range that was already proven unstable. `minTilt` was set by
+  re-deriving that same margin, not by feel — don't loosen it without
+  re-testing picking at the frame's edges at the new minimum tilt.

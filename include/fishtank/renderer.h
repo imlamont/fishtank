@@ -29,6 +29,14 @@ public:
     // about to render with.
     Vec3 pickSurfacePoint(float ndcX, float ndcY, const Boids& sim, float timeSeconds) const;
 
+    // Orbits the camera around the tank. dYaw/dPitch are in radians and
+    // added directly to the current orbit angles — the caller (App::orbit)
+    // is responsible for converting a drag distance into an angle. Pitch is
+    // clamped to a range that keeps pickSurfacePoint()'s ray-plane
+    // intersection numerically stable (see CLAUDE.md) and avoids the
+    // lookAt basis degenerating near straight-down.
+    void addOrbitDelta(float dYaw, float dPitch);
+
     ~Renderer();
 
 private:
@@ -55,6 +63,9 @@ private:
     Mesh plantMesh_;
     std::unique_ptr<Plants> plants_;
     int width_ = 1, height_ = 1;
+
+    float orbitYaw_ = 0.0f;   // radians, around the tank's vertical (Y) axis
+    float orbitPitch_ = 0.0f; // radians, offset from the base downward tilt
 
     std::vector<float> instanceScratch_; // reused each frame to avoid per-frame heap churn
 };

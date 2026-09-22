@@ -1,6 +1,7 @@
 // Native desktop test harness: a plain GLFW window running the same App
-// used by the wasm build. Click anywhere in the window to feed the fish;
-// press Escape or close the window to quit.
+// used by the wasm build. Click to feed the fish, drag to orbit the camera
+// around the tank, Esc or close the window to quit.
+#include <cmath>
 #include <cstdio>
 #include "fishtank/gl_compat.h"
 #include "fishtank/app.h"
@@ -9,20 +10,52 @@ namespace {
 ft::App g_app;
 int g_width = 1024, g_height = 640;
 
+bool g_dragging = false;
+double g_lastX = 0, g_lastY = 0;
+double g_pressX = 0, g_pressY = 0;
+double g_dragDistPx = 0; // accumulated, to tell a click from a drag on release
+
+// Below this, a press+release is treated as a click (feed), not a drag
+// (orbit) — real mice/trackpads always jitter a pixel or two between
+// button-down and button-up.
+constexpr double kClickDragThresholdPx = 4.0;
+
 void onFramebufferResize(GLFWwindow*, int w, int h) {
     g_width = w;
     g_height = h;
     g_app.resize(w, h);
 }
 
+void onCursorPos(GLFWwindow*, double x, double y) {
+    if (!g_dragging) return;
+    double dx = x - g_lastX, dy = y - g_lastY;
+    g_dragDistPx += std::sqrt(dx * dx + dy * dy);
+    g_app.orbit((float)(dx / g_width), (float)(dy / g_height));
+    g_lastX = x;
+    g_lastY = y;
+}
+
 void onMouseButton(GLFWwindow* window, int button, int action, int) {
-    if (button != GLFW_MOUSE_BUTTON_LEFT || action != GLFW_PRESS) return;
+    if (button != GLFW_MOUSE_BUTTON_LEFT) return;
     double mx, my;
     glfwGetCursorPos(window, &mx, &my);
+
+    if (action == GLFW_PRESS) {
+        g_dragging = true;
+        g_dragDistPx = 0;
+        g_lastX = g_pressX = mx;
+        g_lastY = g_pressY = my;
+        return;
+    }
+
+    // GLFW_RELEASE
+    g_dragging = false;
+    if (g_dragDistPx >= kClickDragThresholdPx) return; // was a drag, not a click
+
     // GLFW cursor coords are pixels from the top-left; NDC is [-1,1] with
     // +Y up, so the Y axis has to flip here or clicks land mirrored vertically.
-    float ndcX = (float)(mx / g_width) * 2.0f - 1.0f;
-    float ndcY = 1.0f - (float)(my / g_height) * 2.0f;
+    float ndcX = (float)(g_pressX / g_width) * 2.0f - 1.0f;
+    float ndcY = 1.0f - (float)(g_pressY / g_height) * 2.0f;
     g_app.feedAtScreen(ndcX, ndcY);
 }
 
@@ -61,6 +94,7 @@ int main() {
     glfwSwapInterval(1);
     glfwSetFramebufferSizeCallback(window, onFramebufferResize);
     glfwSetMouseButtonCallback(window, onMouseButton);
+    glfwSetCursorPosCallback(window, onCursorPos);
     glfwSetKeyCallback(window, onKey);
 
     if (!ft::gl::loadFunctions()) {
@@ -76,7 +110,7 @@ int main() {
         return 1;
     }
 
-    std::printf("[fishtank] running — click to feed, Esc to quit\n");
+    std::printf("[fishtank] running — click to feed, drag to orbit, Esc to quit\n");
 
     double lastTime = glfwGetTime();
     while (!glfwWindowShouldClose(window)) {

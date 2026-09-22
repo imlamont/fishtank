@@ -19,6 +19,14 @@ public:
     // lands where it visually looks like the user clicked.
     void feedAtScreen(float ndcX, float ndcY);
 
+    // dx, dy: drag delta as a fraction of canvas width/height (e.g. dragging
+    // all the way across the canvas is dx = ±1.0) — resolution-independent,
+    // same convention as the NDC coords above but as a delta, not a
+    // position. Converts to an angle here (not in Renderer) since "how far
+    // a drag rotates the view" is an interaction/feel decision, not a
+    // camera-geometry one.
+    void orbit(float dx, float dy);
+
     void setFishCount(int count);
 
 private:

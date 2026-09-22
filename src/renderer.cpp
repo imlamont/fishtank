@@ -216,27 +216,49 @@ Mat4 Renderer::computeViewProj(const Boids& sim, float timeSeconds) const {
     // a meaningful angle. A near-level camera makes that intersection
     // ill-conditioned (a ray barely changes height per unit of depth), which
     // is exactly what caused clicks to resolve to wildly wrong positions.
+    // addOrbitDelta() clamps orbitPitch_ to keep this true even under user
+    // dragging — see its clamp bounds for the actual safe range.
     //
     // Distance is derived from the tank size + current aspect ratio (not
     // hardcoded) so the whole tank stays in frame regardless of the embed's
-    // width/height; the tilt then trades a bit of that fit for a
-    // well-conditioned click plane, so the margin below is generous.
-    // Must clear halfFov (~26 degrees) by a comfortable margin, or the
-    // top-of-frame ray (tilt - halfFov) grazes near-horizontal and the
-    // surface-plane intersection goes unstable again — found by checking
-    // actual picked coordinates at the frame edges, not just the center.
-    const float tilt = 0.9f; // ~52 degrees downward
+    // width/height; the margin is generous partly for the click-plane tilt
+    // and partly because an orbited (non-front-on) view can show more of
+    // the tank's diagonal extent than a straight-on one.
+    const float baseTilt = 0.9f; // ~52 degrees downward, before user orbit
     float halfFov = fovY * 0.5f;
     float distForWidth = half.x / (std::tan(halfFov) * aspect);
     float distForHeight = half.y / std::tan(halfFov);
-    float dist = half.z + std::max(distForWidth, distForHeight) * 1.3f;
+    float dist = half.z + std::max(distForWidth, distForHeight) * 1.45f;
 
-    float sway = std::sin(timeSeconds * 0.15f) * 0.25f;
-    Vec3 eye(sway, dist * std::sin(tilt), dist * std::cos(tilt));
+    float tilt = baseTilt + orbitPitch_;
+    float eyeHeight = dist * std::sin(tilt);
+    float eyeRadius = dist * std::cos(tilt); // horizontal distance from the tank's vertical axis
+    Vec3 eye(eyeRadius * std::sin(orbitYaw_), eyeHeight, eyeRadius * std::cos(orbitYaw_));
     Vec3 center(0, 0, 0);
     Mat4 view = Mat4::lookAt(eye, center, Vec3(0, 1, 0));
     Mat4 proj = Mat4::perspective(fovY, aspect, 0.1f, 200.0f);
     return proj * view;
+}
+
+void Renderer::addOrbitDelta(float dYaw, float dPitch) {
+    orbitYaw_ += dYaw; // unbounded — a full spin around the tank is fine
+
+    // Keep tilt away from both extremes: too shallow breaks pickSurfacePoint
+    // (see computeViewProj's comment and CLAUDE.md), too steep (near
+    // straight-down) makes the lookAt basis nearly degenerate since
+    // forward and the world-up hint become almost parallel.
+    const float baseTilt = 0.9f;
+    // minTilt must clear the FOV's half-angle (~26 degrees) by a wide
+    // margin — 0.55 rad (~31 degrees, only ~5 degrees of margin) was tried
+    // and measurably unstable (picked world coordinates blew up to tens of
+    // units at the frame edges); 0.8 rad keeps ~20 degrees of margin,
+    // comfortably in the range already proven stable at the original fixed
+    // tilt of 0.9 rad. Don't lower this without re-testing picking at the
+    // frame's edges/corners, not just the center — see CLAUDE.md.
+    const float minTilt = 0.8f;   // ~46 degrees downward
+    const float maxTilt = 1.45f;  // ~83 degrees downward
+    float tilt = std::max(minTilt, std::min(maxTilt, baseTilt + orbitPitch_ + dPitch));
+    orbitPitch_ = tilt - baseTilt;
 }
 
 Vec3 Renderer::pickSurfacePoint(float ndcX, float ndcY, const Boids& sim, float timeSeconds) const {

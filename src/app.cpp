@@ -21,6 +21,12 @@ void App::feedAtScreen(float ndcX, float ndcY) {
     sim_.feedAt(surface.x, surface.z);
 }
 
+void App::orbit(float dx, float dy) {
+    const float yawPerFullDrag = 3.6f;   // ~1.15 full turns dragging all the way across
+    const float pitchPerFullDrag = 2.4f; // radians, well within Renderer's own clamp
+    renderer_.addOrbitDelta(dx * yawPerFullDrag, dy * pitchPerFullDrag);
+}
+
 void App::setFishCount(int count) { sim_.setFishCount(count); }
 
 } // namespace ft

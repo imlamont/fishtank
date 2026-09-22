@@ -55,6 +55,11 @@ void ft_resize(int widthPx, int heightPx) { g_app.resize(widthPx, heightPx); }
 EMSCRIPTEN_KEEPALIVE
 void ft_feed_at(float ndcX, float ndcY) { g_app.feedAtScreen(ndcX, ndcY); }
 
+// dx, dy: drag delta as a fraction of canvas width/height (dragging fully
+// across the canvas is ±1.0), NOT pixels and NOT NDC — see App::orbit.
+EMSCRIPTEN_KEEPALIVE
+void ft_orbit(float dx, float dy) { g_app.orbit(dx, dy); }
+
 EMSCRIPTEN_KEEPALIVE
 void ft_set_fish_count(int count) { g_app.setFishCount(count); }
 

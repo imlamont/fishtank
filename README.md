@@ -17,12 +17,16 @@ int  ft_init(const char* canvasSelector, int widthPx, int heightPx); // 1 = ok
 void ft_frame(float dtSeconds);           // call once per requestAnimationFrame
 void ft_resize(int widthPx, int heightPx);
 void ft_feed_at(float ndcX, float ndcY);  // click/tap position in NDC (x/y in [-1,1], y-up)
+void ft_orbit(float dx, float dy);        // drag delta as a fraction of canvas size
 void ft_set_fish_count(int count);
 ```
 
 See `web/index.html` for the reference wiring — that's the whole JS contract
 the website needs to reimplement (canvas setup, resize, RAF loop, click ->
-`ft_feed_at`).
+`ft_feed_at`, drag -> `ft_orbit`). It also has the click-vs-drag
+disambiguation (a threshold on total pointer movement between down and up)
+that keeps a small accidental drag from swallowing a feed click, and vice
+versa — reimplement that too, don't just wire `ft_feed_at` to `pointerdown`.
 
 ## Layout
 
@@ -89,7 +93,11 @@ cd web && python3 -m http.server 8934
   wall over time — that's realistic boids behavior, not a bug. The camera
   distance is derived each frame from the tank's half-extents and the
   current aspect ratio (`Renderer::render` in `src/renderer.cpp`) so the
-  full tank stays framed regardless of the embed's width/height.
+  full tank stays framed regardless of the embed's width/height. Dragging
+  orbits the camera around the tank's vertical axis (yaw, unbounded) and
+  adjusts its downward tilt (pitch, clamped — see `addOrbitDelta` in
+  `renderer.cpp`); there's no more automatic idle motion now that the
+  camera is interactive.
 - Fish are procedural low-poly meshes (`fish_mesh.cpp`), not sourced assets,
   instanced via a single dynamic-per-frame instance buffer (position +
   orientation + per-fish hue color).

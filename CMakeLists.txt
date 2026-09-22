@@ -31,7 +31,7 @@ if(EMSCRIPTEN)
         "-sALLOW_MEMORY_GROWTH=1"
         "-sMODULARIZE=1"
         "-sEXPORT_NAME=FishtankModule"
-        "-sEXPORTED_FUNCTIONS=[_ft_init,_ft_frame,_ft_resize,_ft_feed_at,_ft_set_fish_count,_malloc,_free]"
+        "-sEXPORTED_FUNCTIONS=[_ft_init,_ft_frame,_ft_resize,_ft_feed_at,_ft_orbit,_ft_set_fish_count,_malloc,_free]"
         "-sEXPORTED_RUNTIME_METHODS=[ccall,cwrap]"
         "-sENVIRONMENT=web"
         "-sNO_EXIT_RUNTIME=1"
