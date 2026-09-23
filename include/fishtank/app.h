@@ -30,7 +30,7 @@ public:
     void setFishCount(int count);
 
 private:
-    Boids sim_{20, Vec3(6.0f, 3.2f, 3.0f)};
+    Boids sim_{10, Vec3(6.0f, 3.2f, 3.0f)};
     Renderer renderer_;
     float elapsed_ = 0.0f;
 };
