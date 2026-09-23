@@ -19,6 +19,13 @@ float hash01(int i, int j, unsigned seed) {
     return x - std::floor(x);
 }
 
+// The floor's per-vertex height jitter can dip up to this far below
+// halfExtents.y — including at the floor's own edge, right where it meets
+// the walls. buildWallsMesh reads this too, extending its bottom edge
+// further down than that worst case (see kWallBottomExtraDepth below), or
+// the floor's deepest dip at the boundary pokes out past the wall.
+constexpr float kFloorJitterAmp = 0.12f; // absolute world units — small undulation, not dunes
+
 } // namespace
 
 std::vector<MeshVertex> buildFloorMesh(const Vec3& halfExtents, int gridN, unsigned seed) {
@@ -27,12 +34,11 @@ std::vector<MeshVertex> buildFloorMesh(const Vec3& halfExtents, int gridN, unsig
     verts.reserve((size_t)gridN * gridN * 6);
 
     const float floorY = -halfExtents.y;
-    const float jitterAmp = 0.12f; // absolute world units — small undulation, not dunes
 
     auto gridPoint = [&](int i, int j) {
         float x = -halfExtents.x + (2.0f * halfExtents.x) * ((float)i / gridN);
         float z = -halfExtents.z + (2.0f * halfExtents.z) * ((float)j / gridN);
-        float y = floorY + (hash01(i, j, seed) - 0.5f) * 2.0f * jitterAmp;
+        float y = floorY + (hash01(i, j, seed) - 0.5f) * 2.0f * kFloorJitterAmp;
         return Vec3(x, y, z);
     };
 
@@ -53,30 +59,37 @@ std::vector<MeshVertex> buildFloorMesh(const Vec3& halfExtents, int gridN, unsig
 
 std::vector<MeshVertex> buildWallsMesh(const Vec3& halfExtents) {
     std::vector<MeshVertex> verts;
-    float hx = halfExtents.x, hy = halfExtents.y, hz = halfExtents.z;
+    float hx = halfExtents.x, hz = halfExtents.z;
+
+    // The floor can dip as low as halfExtents.y + kFloorJitterAmp, right at
+    // its own edge where it meets the walls (see kFloorJitterAmp's
+    // comment) — extend the walls' bottom edge past that worst case (with
+    // a bit of margin) so there's no gap between the two at any floor seed.
+    float wallBottomY = -halfExtents.y - kFloorJitterAmp - 0.08f;
+    float hy = halfExtents.y; // top edge is unaffected, keep the name for the top corners below
 
     // Left wall (x = -hx), outward normal -X: default winding already
     // gives -X here (see CLAUDE.md derivation).
     {
-        Vec3 a(-hx, -hy, -hz), b(-hx, -hy, hz), c(-hx, hy, hz), d(-hx, hy, -hz);
+        Vec3 a(-hx, wallBottomY, -hz), b(-hx, wallBottomY, hz), c(-hx, hy, hz), d(-hx, hy, -hz);
         pushTri(verts, a, b, c);
         pushTri(verts, a, c, d);
     }
     // Right wall (x = +hx), outward normal +X: needs flipped winding.
     {
-        Vec3 a(hx, -hy, -hz), b(hx, -hy, hz), c(hx, hy, hz), d(hx, hy, -hz);
+        Vec3 a(hx, wallBottomY, -hz), b(hx, wallBottomY, hz), c(hx, hy, hz), d(hx, hy, -hz);
         pushTri(verts, a, c, b);
         pushTri(verts, a, d, c);
     }
     // Back wall (z = -hz), outward normal -Z: needs flipped winding.
     {
-        Vec3 a(-hx, -hy, -hz), b(hx, -hy, -hz), c(hx, hy, -hz), d(-hx, hy, -hz);
+        Vec3 a(-hx, wallBottomY, -hz), b(hx, wallBottomY, -hz), c(hx, hy, -hz), d(-hx, hy, -hz);
         pushTri(verts, a, c, b);
         pushTri(verts, a, d, c);
     }
     // Front wall (z = +hz), outward normal +Z: default winding.
     {
-        Vec3 a(-hx, -hy, hz), b(hx, -hy, hz), c(hx, hy, hz), d(-hx, hy, hz);
+        Vec3 a(-hx, wallBottomY, hz), b(hx, wallBottomY, hz), c(hx, hy, hz), d(-hx, hy, hz);
         pushTri(verts, a, b, c);
         pushTri(verts, a, c, d);
     }

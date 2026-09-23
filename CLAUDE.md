@@ -275,6 +275,19 @@ cd web && python3 -m http.server 8934   # open http://localhost:8934/
   world-space panel, work out its winding the same way: cross(b-a, c-a)
   must point in the direction you want visible from outside, not just "some
   consistent direction."
+- **The walls' bottom edge is intentionally *below* `-halfExtents.y`, not
+  flush with it.** The floor mesh has per-vertex height jitter
+  (`kFloorJitterAmp`, currently 0.12 units) for the sand undulation,
+  including at its own outer edge where it meets the walls — so a wall
+  whose bottom edge sat exactly at `-halfExtents.y` would show a gap
+  wherever the floor's edge jittered downward past it. `buildWallsMesh`
+  reads `kFloorJitterAmp` and extends its bottom edge that far below
+  `-halfExtents.y` (plus a small margin), guaranteeing coverage regardless
+  of the floor's random seed. If `kFloorJitterAmp` (or the floor's grid
+  resolution, which changes how extreme adjacent-vertex jitter can look)
+  ever changes, the wall's extra depth needs to stay ahead of it — they're
+  read from the same constant specifically so this can't silently drift
+  out of sync.
 - **Drag-to-orbit reuses the same click-vs-drag disambiguation in both
   `main_native.cpp` and `web/index.html`**: accumulate total pointer
   movement between press and release, and only treat it as a feed click if
