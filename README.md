@@ -5,6 +5,14 @@ compiled to WebAssembly for [imlamont.com](https://imlamont.com). Boids-style
 flocking + a small custom renderer talking straight to WebGL2/GLES3 — no JS
 rendering framework in the loop.
 
+<p float="left">
+  <img src="screenshots/tank-overview.png" width="49%" alt="The tank at rest: fish, plants, sand floor, glass walls, and the rippling water surface.">
+  <img src="screenshots/feeding.png" width="49%" alt="Fish converging on dropped food.">
+</p>
+
+(Native-build screenshots, taken headlessly via `FISHTANK_SCREENSHOT` — see
+"Debugging" in CLAUDE.md.)
+
 ## Boundary with the website
 
 This module only simulates and renders. It knows nothing about the feed
